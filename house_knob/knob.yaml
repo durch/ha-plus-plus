@@ -8,6 +8,9 @@ listen:
 climate:
   - id: indoors
     name: Indoors
+    # TODO(on site): the authoritative indoor Netatmo is currently powered off.
+    # When it is back, confirm which station/sensor it is (sensor.dnevni_temperature,
+    # a Netatmo "Dnevni" station, is the one showing unavailable) and switch `sensor` to it.
     sensor: sensor.oxymoron_temperature   # Netatmo station "Oxymoron": authoritative room temperature
     save_default:            # long-press: current floor setpoints become the schedule's values
       away: input_number.floor_away
