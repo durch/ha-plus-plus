@@ -1,15 +1,18 @@
 #!/usr/bin/with-contenv sh
 # House Knob bridge add-on entrypoint.
-# Config lives in the add-on config dir (/config inside the container,
-# addon_configs/<slug>/ on the HA host) so it survives updates and is editable.
+# /config inside the container is addon_configs/<slug>/ on the HA host: an optional
+# knob.yaml override and the firmware/ folder served to the knob for updates.
 set -e
-[ -f /config/knob.yaml ] || cp /app/knob.default.yaml /config/knob.yaml
+# The bundled knob.yaml is used unless you drop your own at addon_configs/<slug>/knob.yaml,
+# so add-on updates bring config changes with them.
+CONFIG=/app/knob.default.yaml
+[ -f /config/knob.yaml ] && CONFIG=/config/knob.yaml
 mkdir -p /config/firmware
 
 export HA_URL="http://supervisor/core"
 export HA_TOKEN="${SUPERVISOR_TOKEN}"
 
-ARGS="--config /config/knob.yaml --firmware-dir /config/firmware --state /data/state.json"
+ARGS="--config $CONFIG --firmware-dir /config/firmware --state /data/state.json"
 if [ "$(jq -r '.dry_run' /data/options.json 2>/dev/null)" = "true" ]; then
   ARGS="$ARGS --dry-run"
 fi

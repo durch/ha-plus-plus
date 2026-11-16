@@ -16,7 +16,10 @@ log = logging.getLogger("ha")
 class HAClient:
     def __init__(self, url: str, token: str, watch: set[str],
                  on_change: Callable[[str], Awaitable[None]]):
-        self.ws_url = url.rstrip("/").replace("http", "ws", 1) + "/api/websocket"
+        base = url.rstrip("/").replace("http", "ws", 1)
+        # Inside an add-on, Core is reached through the Supervisor proxy, whose
+        # WebSocket lives at /core/websocket (not /core/api/websocket).
+        self.ws_url = base + ("/websocket" if base.endswith("supervisor/core") else "/api/websocket")
         self.token = token
         self.watch = watch
         self.on_change = on_change

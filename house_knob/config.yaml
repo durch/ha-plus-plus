@@ -1,5 +1,5 @@
 name: House Knob bridge
-version: "0.1.0"
+version: "0.2.0"
 slug: house_knob
 description: Bridge between Home Assistant and the House Knob (ESP32-S3 rotary controller), hk/1 protocol
 url: https://github.com/durch/ha-plus-plus
@@ -15,6 +15,6 @@ ports_description:
 map:
   - addon_config:rw
 options:
-  dry_run: false
+  dry_run: true   # first start is safe: reads the house, changes nothing. Turn off to go live.
 schema:
   dry_run: bool
