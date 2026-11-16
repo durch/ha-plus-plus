@@ -152,3 +152,20 @@ def test_indoors_target_and_now_come_from_netatmo(layout):
     s["sensor.oxymoron_temperature"] = st("unavailable")
     out = house.state(s)
     assert "sensor offline" in out["secondary"] and out["value"] == 21.0
+
+
+async def test_save_default_writes_schedule_helpers(layout, monkeypatch):
+    house = layout.controls["indoors"]
+    s = house_states(**{"climate.dnevni": st("heat", temperature=27.0), "climate.dnevni_2": st("heat", temperature=24.5),
+                        "input_select.house_mode": st("Home")})
+    monkeypatch.setattr(type(house), "_period", lambda self, states: "day")
+    rec = Rec()
+    assert await house.action(s, "save_default", rec) == "Saved as day default"
+    assert rec.calls == [
+        ("input_number", "set_value", {"entity_id": "input_number.dnevni_floor_day", "value": 27.0}),
+        ("input_number", "set_value", {"entity_id": "input_number.dnevni_2_floor_day", "value": 24.5})]
+    s["input_select.house_mode"] = st("Away")
+    monkeypatch.undo()
+    rec = Rec()
+    await house.action(s, "save_default", rec)
+    assert {c[2]["entity_id"] for c in rec.calls} == {"input_number.floor_away"}

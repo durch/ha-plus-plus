@@ -33,7 +33,7 @@
 <div id="mode" class="help" style="font-weight:600"></div>
 <div class="help">
   <kbd>wheel</kbd>/<kbd>↑↓</kbd> turn knob · <kbd>click</kbd>/<kbd>space</kbd> tap screen ·
-  <kbd>enter</kbd> press knob (enter / back) · <kbd>←→</kbd> swipe (climate mode / light preset) · <kbd>esc</kbd> back
+  <kbd>enter</kbd> press knob (enter / back) · <kbd>←→</kbd> swipe (climate mode / light preset) · <kbd>esc</kbd> back · <kbd>hold click</kbd>/<kbd>L</kbd> long-press (save as default)
 </div>
 <script>
 const el = document.getElementById('knob');
@@ -49,7 +49,7 @@ function connect() {
     if (m.t === 'hello') { S.dry = !!m.dry_run; document.getElementById('mode').textContent = S.dry ? 'DRY RUN: nothing is sent to Home Assistant' : 'LIVE: changes your house'; document.getElementById('mode').style.color = S.dry ? '#8bc34a' : '#ff7043'; }
     else if (m.t === 'layout') S.sections = m.sections;
     else if (m.t === 'state') S.states[m.id] = m;
-    else if (m.t === 'ack' && !m.ok) { S.ack = m.message; setTimeout(() => { S.ack = null; render(); }, 2500); }
+    else if (m.t === 'ack' && (!m.ok || m.message)) { S.ack = m.message; S.ackOk = m.ok; setTimeout(() => { S.ack = null; render(); }, 2500); }
     render();
   };
 }
@@ -87,10 +87,17 @@ function swipe(dir) {
 }
 
 el.addEventListener('wheel', e => { e.preventDefault(); turn(e.deltaY > 0 ? 1 : -1); }, { passive:false });
-el.addEventListener('click', tap);
+let holdTimer = null, held = false;
+function longPress() {   // long-press on a control: its first action (e.g. Save as default)
+  const st = S.states[curId()];
+  if (S.view === 'control' && st?.actions?.length) send({ t:'action', id:st.id, name:st.actions[0] });
+}
+el.addEventListener('mousedown', () => { held = false; holdTimer = setTimeout(() => { held = true; longPress(); }, 700); });
+el.addEventListener('mouseup', () => clearTimeout(holdTimer));
+el.addEventListener('click', () => { if (!held) tap(); });
 document.addEventListener('keydown', e => {
   const k = { ArrowUp:() => turn(1), ArrowDown:() => turn(-1), ' ':tap, Enter:press, Escape:back,
-              ArrowLeft:() => swipe(-1), ArrowRight:() => swipe(1) }[e.key];
+              ArrowLeft:() => swipe(-1), ArrowRight:() => swipe(1), l:longPress, L:longPress }[e.key];
   if (k) { e.preventDefault(); k(); }
 });
 
@@ -106,7 +113,7 @@ const esc = s => String(s ?? '').replace(/[&<>]/g, c => ({ '&':'&amp;', '<':'&lt
 
 function render() {
   if (!S.conn) { el.innerHTML = `<div class="center"><div class="icon">wifi_off</div><div class="name">Connecting to bridge…</div></div>`; return; }
-  const status = S.ack ? `<div class="status" style="color:var(--warn)">${esc(S.ack)}</div>` : '';
+  const status = S.ack ? `<div class="status" style="color:${S.ackOk ? '#8bc34a' : 'var(--warn)'}">${esc(S.ack)}</div>` : '';
   if (S.view === 'home' || S.view === 'list') {
     const items = S.view === 'home'
       ? S.sections.map(s => [s.icon, s.name])
@@ -131,7 +138,7 @@ function render() {
     <div class="center"><div class="icon">${esc(st.icon)}</div><div class="name">${esc(st.name)}</div>
     <div class="primary" style="color:${st.available ? 'var(--fg)' : 'var(--dim)'}">${esc(st.available ? primary : 'Unavailable')}</div>
     <div class="secondary">${esc(st.secondary)}</div>${modes}</div>
-    ${st.warning ? `<div class="warn">⚠ ${esc(st.warning)}</div>` : ''}`;
+    ${st.warning ? `<div class="warn">⚠ ${esc(st.warning)}</div>` : st.actions?.length ? `<div class="warn" style="color:var(--dim)">hold to save as default</div>` : ''}`;
   if (turning) setTimeout(render, 1600);
 }
 connect(); render(); el.focus();

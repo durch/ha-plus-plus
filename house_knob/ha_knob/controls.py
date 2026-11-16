@@ -62,6 +62,9 @@ class Control:
     async def set_mode(self, states: States, mode: str, call: Call) -> None:
         raise ValueError(f"{self.id} has no modes")
 
+    async def action(self, states: States, name: str, call: Call) -> str | None:
+        raise ValueError(f"{self.id} has no action {name!r}")
+
 
 # ── Climate ─────────────────────────────────────────────────────────────────
 
@@ -100,13 +103,19 @@ class ClimateControl(Control):
     # are just actuators that get bumped in lockstep). Persisted via `store`.
     targets: dict[str, float] = field(default_factory=dict)
     store: Callable[[], None] | None = None
+    # "Save as default": write devices' current setpoints into the schedule helpers
+    # their automations read. [{entity, day, night}], plus house_mode/away helper.
+    defaults: list[dict] = field(default_factory=list)
+    away_helper: str | None = None
+    house_mode: str = "input_select.house_mode"
     # Exact (unrounded) per-device setpoints, so 0.5° knob steps accumulate on
     # devices that only take whole degrees.
     exact: dict[str, float] = field(default_factory=dict)
 
     def entities(self) -> set[str]:
         ids = {m.entity for g in (self.heat, self.cool) for m in g.members}
-        return ids | set(self.warn_if_open) | ({self.sensor} if self.sensor else set())
+        return (ids | set(self.warn_if_open) | ({self.sensor} if self.sensor else set())
+                | ({self.house_mode} if self.defaults else set()))
 
     def _group(self, mode: str) -> ModeGroup:
         return self.heat if mode == "heat" else self.cool
@@ -198,7 +207,28 @@ class ClimateControl(Control):
             "secondary": (f"Now {_fmt_temp(now)}" + spread) if mode != "off"
                          else f"Now {_fmt_temp(now)}{spread} · {shown} {_fmt_temp(value)}",
             "warning": warning,
+            "actions": ["save_default"] if self.defaults else [],
         }
+
+    def _period(self, states: States) -> str:
+        if (states.get(self.house_mode) or {}).get("state") == "Away":
+            return "away"
+        return "day" if 6 <= _dt.datetime.now().hour < 23 else "night"
+
+    async def action(self, states: States, name: str, call: Call) -> str | None:
+        if name != "save_default" or not self.defaults:
+            raise ValueError(f"{self.id} has no action {name!r}")
+        period = self._period(states)
+        saved = []
+        for d in self.defaults:
+            t = _attr(states, d["entity"], "temperature")
+            helper = self.away_helper if period == "away" else d.get(period)
+            if helper and isinstance(t, (int, float)):
+                await call("input_number", "set_value", {"entity_id": helper, "value": float(t)})
+                saved.append(f"{_fmt_temp(float(t))}")
+        if not saved:
+            raise ValueError("nothing to save")
+        return f"Saved as {period} default"
 
     async def adjust(self, states: States, value: float, call: Call) -> None:
         """Shift every device of the shown mode by (value - current group value)."""
@@ -434,6 +464,8 @@ def build(config: dict) -> Layout:
         ctl = ClimateControl(c["id"], c["name"], c.get("icon", "thermostat"),
                              _group(c["heat"], "heat"), _group(c["cool"], "cool"),
                              list(c.get("warn_if_open", [])), c.get("sensor"))
+        ctl.defaults = list(c.get("save_default", {}).get("entities", []))
+        ctl.away_helper = c.get("save_default", {}).get("away")
         controls[ctl.id] = ctl
         ids.append(ctl.id)
     if ids:

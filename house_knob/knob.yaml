@@ -9,6 +9,11 @@ climate:
   - id: indoors
     name: Indoors
     sensor: sensor.oxymoron_temperature   # Netatmo station "Oxymoron": authoritative room temperature
+    save_default:            # long-press: current floor setpoints become the schedule's values
+      away: input_number.floor_away
+      entities:
+        - {entity: climate.dnevni, day: input_number.dnevni_floor_day, night: input_number.dnevni_floor_night}
+        - {entity: climate.dnevni_2, day: input_number.dnevni_2_floor_day, night: input_number.dnevni_2_floor_night}
     icon: home
     warn_if_open:            # warn on the knob while heating and any of these are open
       - cover.velux_window_roof_window

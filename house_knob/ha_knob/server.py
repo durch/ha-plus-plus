@@ -73,6 +73,11 @@ class Bridge:
                 await ctl.toggle(self.ha.states, self.ha.call)
             elif t == "mode":
                 await ctl.set_mode(self.ha.states, str(msg["mode"]), self.ha.call)
+            elif t == "action":
+                note = await ctl.action(self.ha.states, str(msg["name"]), self.ha.call)
+                await ws.send_json({"t": "ack", "seq": seq, "ok": True, "message": note})
+                await self._broadcast(self._state(cid))
+                return
             else:
                 raise ValueError(f"unknown message type {t!r}")
             await ws.send_json({"t": "ack", "seq": seq, "ok": True})
