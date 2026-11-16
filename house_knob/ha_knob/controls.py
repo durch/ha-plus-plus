@@ -208,12 +208,7 @@ class ClimateControl(Control):
                 warning = f"{len(open_)} window{'s' if len(open_) > 1 else ''} open"
         if not warning and unavailable and len(unavailable) < len(group.members):
             warning = f"{len(unavailable)} unavailable"
-        if mode == "off":
-            secondary = "Off"
-        elif abs(offset) < 1e-6:
-            secondary = ""
-        else:
-            secondary = f"{'Warmer' if offset > 0 else 'Cooler'} {offset:+.1f}°"
+        secondary = ""   # the knob's screen shows mode and nudge itself; no extra text
         if mode == "cool":
             target = self._cool_target(states)
             return {

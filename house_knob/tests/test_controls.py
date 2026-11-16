@@ -158,12 +158,12 @@ def test_indoors_shows_room_sensor_and_relative_offset(layout):
     out = house.state(s)
     assert out["primary"] == "21.3°" and out["value"] == 0 and (out["min"], out["max"]) == (-5, 5)
     house.targets["heat"] = 1.0
-    assert house.state(s)["secondary"] == "Warmer +1.0°"
+    assert house.state(s)["value"] == 1.0 and house.state(s)["secondary"] == ""
     s["sensor.oxymoron_temperature"] = st("unavailable")
     assert house.state(s)["primary"] == "–"
     s["climate.dnevni"] = st("off", temperature=26.5)
     out = house.state(s)
-    assert out["secondary"] == "Off" and out["adjustable"] is False
+    assert out["mode"] == "off" and out["adjustable"] is False
 
 
 async def test_tap_cycles_modes_and_only_applies_after_settling(layout, monkeypatch):
