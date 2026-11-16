@@ -146,9 +146,9 @@ async def test_cover_groups_up_down(layout):
 def test_indoors_target_and_now_come_from_netatmo(layout):
     house = layout.controls["indoors"]
     house.targets.clear()
-    s = house_states(**{"sensor.dnevni_temperature": st("21.3")})
+    s = house_states(**{"sensor.oxymoron_temperature": st("21.3")})
     out = house.state(s)
     assert out["value"] == 21.5 and out["secondary"].startswith("Now 21.3°")
-    s["sensor.dnevni_temperature"] = st("unavailable")
+    s["sensor.oxymoron_temperature"] = st("unavailable")
     out = house.state(s)
     assert "sensor offline" in out["secondary"] and out["value"] == 21.0

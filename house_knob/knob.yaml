@@ -8,7 +8,7 @@ listen:
 climate:
   - id: indoors
     name: Indoors
-    sensor: sensor.dnevni_temperature   # Netatmo, authoritative room temperature
+    sensor: sensor.oxymoron_temperature   # Netatmo station "Oxymoron": authoritative room temperature
     icon: home
     warn_if_open:            # warn on the knob while heating and any of these are open
       - cover.velux_window_roof_window
