@@ -38,7 +38,7 @@
 <main>
   <header>
     <h1>Indoors: Off, Heat, Cool and the schedule</h1>
-    <p class="lede">How the knob, the bridge, the Home Assistant helpers and the floor schedule fit together. Proposed design; the schedule switch is not built yet.</p>
+    <p class="lede">How the knob, the bridge, the Home Assistant helpers and the floor schedule fit together. Built and live in Home Assistant since 16 Nov 2026.</p>
   </header>
 
   <section>
@@ -64,11 +64,11 @@
         <rect x="360" y="112" width="180" height="78" rx="8" fill="var(--surface)" stroke="currentColor" stroke-width="1"/>
         <text x="450" y="140" text-anchor="middle" font-size="14" font-weight="600" fill="currentColor">Wake (06:00–23:00)</text>
         <text x="450" y="160" text-anchor="middle" font-size="12" fill="var(--muted)">each floor = wake + its offset</text>
-        <text x="450" y="177" text-anchor="middle" font-size="12" fill="var(--muted)">wake set point 26.5° today</text>
+        <text x="450" y="177" text-anchor="middle" font-size="12" fill="var(--muted)">wake set point 25°</text>
         <rect x="360" y="262" width="180" height="78" rx="8" fill="var(--surface)" stroke="currentColor" stroke-width="1"/>
         <text x="450" y="290" text-anchor="middle" font-size="14" font-weight="600" fill="currentColor">Sleep (23:00–06:00)</text>
         <text x="450" y="310" text-anchor="middle" font-size="12" fill="var(--muted)">each floor = sleep + its offset</text>
-        <text x="450" y="327" text-anchor="middle" font-size="12" fill="var(--muted)">sleep set point 24° today</text>
+        <text x="450" y="327" text-anchor="middle" font-size="12" fill="var(--muted)">sleep set point 22°</text>
         <line x1="420" y1="190" x2="420" y2="260" stroke="currentColor" stroke-width="1.3" marker-end="url(#ar)"/>
         <text x="412" y="230" text-anchor="end" font-size="12" fill="currentColor">23:00</text>
         <line x1="480" y1="262" x2="480" y2="192" stroke="currentColor" stroke-width="1.3" marker-end="url(#ar)"/>
@@ -151,17 +151,17 @@
       <table>
         <thead><tr><th>Helper</th><th>Holds</th><th>Start value</th><th>Changed by</th></tr></thead>
         <tbody>
-          <tr><td>indoors_wake</td><td>Set point 06:00–23:00</td><td>26.5°</td><td>You, in HA</td></tr>
-          <tr><td>indoors_sleep</td><td>Set point 23:00–06:00</td><td>24°</td><td>You, in HA</td></tr>
-          <tr><td>indoors_away</td><td>Set point while house mode is Away</td><td>20°</td><td>You, in HA</td></tr>
+          <tr><td>indoors_wake</td><td>Set point 06:00–23:00</td><td>25°</td><td>You, in HA</td></tr>
+          <tr><td>indoors_sleep</td><td>Set point 23:00–06:00</td><td>22°</td><td>You, in HA</td></tr>
+          <tr><td>indoors_away</td><td>Set point while house mode is Away</td><td>18°</td><td>You, in HA</td></tr>
           <tr><td>offset_dnevni</td><td>Dnevni’s correction</td><td>0°</td><td>Knob long-press, later calibration</td></tr>
           <tr><td>offset_dnevni_2</td><td>Dnevni 2’s correction</td><td>0°</td><td>Knob long-press, later calibration</td></tr>
-          <tr><td>offset_hodnik</td><td>Hodnik’s correction</td><td>to be given</td><td>Knob long-press, later calibration</td></tr>
+          <tr><td>offset_hodnik</td><td>Hodnik’s correction</td><td>0°</td><td>Knob long-press, later calibration</td></tr>
           <tr><td>indoors_schedule</td><td>Schedule switch</td><td>on</td><td>Knob: Heat on, Off and Cool off</td></tr>
         </tbody>
       </table>
       </div>
-      <figcaption>Every floor setpoint is set point + that floor’s offset. With these start values Dnevni and Dnevni 2 behave exactly as they do today.</figcaption>
+      <figcaption>Every floor setpoint is set point + that floor’s offset. All offsets assume floor calibration 0 in the Tuya app on every thermostat.</figcaption>
     </figure>
   </section>
 
@@ -170,12 +170,12 @@
     <ul>
       <li>The schedule switch follows the knob only. Turning the floors off in the HA app or at the wall leaves the schedule running, as today.</li>
       <li>House mode Away is unchanged: it sets the floors to the away temperature regardless of the knob.</li>
-      <li>One offset per thermostat means every floor has the same gap between Wake and Sleep (2.5° today). A floor cannot have its own night drop.</li>
+      <li>One offset per thermostat means every floor has the same gap between Wake and Sleep (3° today). A floor cannot have its own night drop.</li>
       <li>The knob cannot change the Wake or Sleep set points themselves, only shift everything warmer or cooler.</li>
       <li>The big number on the knob is the Netatmo Oxymoron room temperature. It is display only and does not steer anything.</li>
       <li>Outdoors has no schedule. Its Off simply switches the heaters and the terrace AC off.</li>
     </ul>
   </section>
 
-  <p class="status">Built today: tap cycling with the 1.5 s delay and the relative nudge. Proposed and waiting for a go: the set point and offset helpers (replacing the per-room day and night helpers made earlier), Hodnik in the schedule, the schedule switch, and applying Wake or Sleep when entering Heat.</p>
+  <p class="status">Everything on this page is built. The knob itself still runs against the bridge in dry run, so its gestures do not reach the house yet.</p>
 </main>
