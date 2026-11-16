@@ -406,7 +406,7 @@ class CoverControl(Control):
         else:
             primary = "Closed" if value == 0 else ("Open" if value == 100 else f"{value}%")
         if moving:
-            primary = "Moving…"
+            primary = "Moving"
         return {
             "t": "state", "id": self.id, "kind": self.kind, "name": self.name, "icon": self.icon,
             "available": bool(pos), "on": is_open,
