@@ -7,12 +7,17 @@ Pure logic. `states` is a dict entity_id -> HA state object (dict with
 
 from __future__ import annotations
 
+import asyncio
 import datetime as _dt
+import time
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable  # noqa: F401
 
 Call = Callable[[str, str, dict], Awaitable[Any]]
 States = dict[str, dict]
+
+OFFSET_RANGE = 5.0     # how far the knob can nudge a climate group, °C
+MODE_SETTLE_S = 1.5    # taps cycle modes; devices switch once tapping stops
 
 UNAVAILABLE = {"unavailable", "unknown", None}
 
@@ -99,12 +104,14 @@ class ClimateControl(Control):
     sensor: str | None = None     # room temperature sensor: the temperature that matters
     kind: str = "climate"
     last_mode: str | None = None
-    # Desired room temperature per mode, held by the bridge (devices' own setpoints
-    # are just actuators that get bumped in lockstep). Persisted via `store`.
+    # Per-mode offset: how far the knob has nudged the devices (lockstep) from their
+    # baseline. Persisted via `store`; reset by "Save as default".
     targets: dict[str, float] = field(default_factory=dict)
     store: Callable[[], None] | None = None
     # "Save as default": write devices' current setpoints into the schedule helpers
     # their automations read. [{entity, day, night}], plus house_mode/away helper.
+    pending: tuple[str, float] | None = None   # (mode, monotonic deadline)
+    _settle: Any = None
     defaults: list[dict] = field(default_factory=list)
     away_helper: str | None = None
     house_mode: str = "input_select.house_mode"
@@ -156,19 +163,6 @@ class ClimateControl(Control):
                 return None
         return None
 
-    def _target(self, states: States, mode: str) -> float:
-        group = self._group(mode)
-        if mode in self.targets:
-            return self.targets[mode]
-        room = self._room_temp(states)
-        if room is not None:
-            base = room
-        elif self.sensor:
-            base = 21.0 if mode == "heat" else 24.0  # sensor offline: neutral starting point
-        else:
-            base = self._value(states, group)
-        return _snap(base, group.min, group.max, group.step)
-
     def _current_temp(self, states: States, group: ModeGroup) -> float | None:
         if self.sensor:  # authoritative sensor only; device readings are differently calibrated
             return self._room_temp(states)
@@ -177,13 +171,22 @@ class ClimateControl(Control):
         temps = [float(t) for t in temps if isinstance(t, (int, float))]
         return sum(temps) / len(temps) if temps else None
 
+    def shown_mode(self, states: States) -> str:
+        """Mode to display: a just-tapped mode wins until the devices catch up."""
+        actual = self.current_mode(states)
+        if self.pending:
+            mode, deadline = self.pending
+            if actual == mode or time.monotonic() > deadline:
+                self.pending = None
+            else:
+                return mode
+        return actual
+
     def state(self, states: States) -> dict:
-        mode = self.current_mode(states)
-        shown = mode if mode != "off" else self._default_mode()
-        group = self._group(shown)
-        value = self._target(states, shown)
-        sp = self._setpoints(states, group)
+        mode = self.shown_mode(states)
+        group = self._group(mode if mode != "off" else self._default_mode())
         now = self._current_temp(states, group)
+        offset = self.targets.get(mode, 0.0) if mode != "off" else 0.0
         unavailable = [_friendly(states, m.entity) for m in group.members
                        if not _avail(states, m.entity)]
         warning = None
@@ -194,18 +197,22 @@ class ClimateControl(Control):
                 warning = f"{len(open_)} window{'s' if len(open_) > 1 else ''} open"
         if not warning and unavailable and len(unavailable) < len(group.members):
             warning = f"{len(unavailable)} unavailable"
-        spread = " (sensor offline)" if self.sensor and self._room_temp(states) is None else ""
+        if mode == "off":
+            secondary = "Off"
+        elif abs(offset) < 1e-6:
+            secondary = "Turn to adjust"
+        else:
+            secondary = f"{'Warmer' if offset > 0 else 'Cooler'} {offset:+.1f}°"
         return {
             "t": "state", "id": self.id, "kind": self.kind, "name": self.name, "icon": self.icon,
             "available": len(unavailable) < len(group.members),
             "on": mode != "off", "mode": mode, "modes": ["off", "heat", "cool"],
-            "value": value,
-            # Lockstep moves are relative; the range just bounds the representative value.
-            "min": group.min, "max": group.max, "step": group.step, "unit": "°C",
-            "adjustable": True,
-            "primary": _fmt_temp(value) if mode != "off" else "Off",
-            "secondary": (f"Now {_fmt_temp(now)}" + spread) if mode != "off"
-                         else f"Now {_fmt_temp(now)}{spread} · {shown} {_fmt_temp(value)}",
+            # The knob is relative: `value` is how far the devices have been nudged
+            # from where they were; the big number is the room temperature.
+            "value": offset, "min": -OFFSET_RANGE, "max": OFFSET_RANGE, "step": group.step,
+            "unit": "°C", "adjustable": mode != "off",
+            "primary": _fmt_temp(now),
+            "secondary": secondary,
             "warning": warning,
             "actions": ["save_default"] if self.defaults else [],
         }
@@ -228,16 +235,20 @@ class ClimateControl(Control):
                 saved.append(f"{_fmt_temp(float(t))}")
         if not saved:
             raise ValueError("nothing to save")
+        self.targets.clear()  # the nudge is now the baseline
+        if self.store:
+            self.store()
         return f"Saved as {period} default"
 
     async def adjust(self, states: States, value: float, call: Call) -> None:
-        """Shift every device of the shown mode by (value - current group value)."""
-        mode = self.current_mode(states)
-        shown = mode if mode != "off" else self._default_mode()
-        group = self._group(shown)
-        new = _snap(float(value), group.min, group.max, group.step)
-        delta = new - self._target(states, shown)
-        self.targets[shown] = new
+        """Nudge every device of the active mode by the change in offset (lockstep)."""
+        mode = self.shown_mode(states)
+        if mode == "off":
+            return
+        group = self._group(mode)
+        new = _snap(float(value), -OFFSET_RANGE, OFFSET_RANGE, group.step)
+        delta = new - self.targets.get(mode, 0.0)
+        self.targets[mode] = new
         if self.store:
             self.store()
         if abs(delta) < 1e-6:
@@ -280,12 +291,20 @@ class ClimateControl(Control):
             await call("climate", "set_hvac_mode", {"entity_id": ids, "hvac_mode": "off"})
 
     async def toggle(self, states: States, call: Call) -> None:
-        mode = self.current_mode(states)
-        if mode == "off":
-            await self._apply(states, self._default_mode(), call)
-        else:
-            self.last_mode = mode
-            await self._apply(states, "off", call)
+        """Tap cycles Off -> Heat -> Cool -> Off. The devices are only switched once the
+        taps stop, so passing through Cool on the way to Off never starts the ACs."""
+        order = ["off", "heat", "cool"]
+        nxt = order[(order.index(self.shown_mode(states)) + 1) % 3]
+        self.pending = (nxt, time.monotonic() + MODE_SETTLE_S + 8)
+        if self._settle:
+            self._settle.cancel()
+
+        async def settle():
+            await asyncio.sleep(MODE_SETTLE_S)
+            if self.current_mode(states) != nxt:
+                await self._apply(states, nxt, call)
+
+        self._settle = asyncio.get_running_loop().create_task(settle())
 
     async def set_mode(self, states: States, mode: str, call: Call) -> None:
         if mode not in ("off", "heat", "cool"):

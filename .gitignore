@@ -8,3 +8,4 @@ build-fw.log
 state.json
 snapshots/
 backups/
+fw-dist/

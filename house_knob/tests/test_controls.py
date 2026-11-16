@@ -143,15 +143,36 @@ async def test_cover_groups_up_down(layout):
     assert windows.state({e: st("closed", current_position=0) for e in windows.members})["primary"] == "Closed"
 
 
-def test_indoors_target_and_now_come_from_netatmo(layout):
+def test_indoors_shows_room_sensor_and_relative_offset(layout):
     house = layout.controls["indoors"]
     house.targets.clear()
-    s = house_states(**{"sensor.oxymoron_temperature": st("21.3")})
+    s = house_states(**{"sensor.oxymoron_temperature": st("21.3"),
+                        "climate.dnevni": st("heat", temperature=26.5, current_temperature=19.0)})
     out = house.state(s)
-    assert out["value"] == 21.5 and out["secondary"].startswith("Now 21.3°")
+    assert out["primary"] == "21.3°" and out["value"] == 0 and (out["min"], out["max"]) == (-5, 5)
+    house.targets["heat"] = 1.0
+    assert house.state(s)["secondary"] == "Warmer +1.0°"
     s["sensor.oxymoron_temperature"] = st("unavailable")
+    assert house.state(s)["primary"] == "–"
+    s["climate.dnevni"] = st("off", temperature=26.5)
     out = house.state(s)
-    assert "sensor offline" in out["secondary"] and out["value"] == 21.0
+    assert out["secondary"] == "Off" and out["adjustable"] is False
+
+
+async def test_tap_cycles_modes_and_only_applies_after_settling(layout, monkeypatch):
+    import ha_knob.controls as c
+    monkeypatch.setattr(c, "MODE_SETTLE_S", 0.05)
+    house = layout.controls["indoors"]
+    s = house_states(**{"climate.dnevni": st("heat", temperature=26.5)})
+    rec = Rec()
+    await house.toggle(s, rec)          # heat -> cool (pending)
+    assert house.state(s)["mode"] == "cool" and rec.calls == []
+    await house.toggle(s, rec)          # cool -> off, before cool was ever applied
+    assert house.state(s)["mode"] == "off"
+    import asyncio
+    await asyncio.sleep(0.15)
+    assert [(x[1], x[2]["hvac_mode"]) for x in rec.calls] == [("set_hvac_mode", "off")]
+    assert not any(x[2].get("hvac_mode") == "cool" for x in rec.calls)
 
 
 async def test_save_default_writes_schedule_helpers(layout, monkeypatch):

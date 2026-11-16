@@ -82,7 +82,7 @@ function press() {   // knob press: enter / back
 function back() { S.view = S.view === 'control' ? 'list' : 'home'; render(); }
 function tap() { if (S.view !== 'control') return press(); send({ t:'toggle', id:curId() }); }
 function swipe(dir) {
-  const st = S.states[curId()]; if (S.view !== 'control' || !st?.modes) return;
+  const st = S.states[curId()]; if (S.view !== 'control' || !st?.modes || st.kind === 'climate') return;
   const n = st.modes.length, i = st.modes.indexOf(st.mode);
   const next = i < 0 ? (dir > 0 ? 0 : n - 1) : (i + dir + n) % n;
   send({ t:'mode', id:st.id, mode: st.modes[next] });
@@ -132,7 +132,7 @@ function render() {
   const v = value(st), frac = (v - st.min) / (st.max - st.min);
   const color = !st.on ? 'var(--off)' : st.mode === 'heat' ? 'var(--heat)' : st.mode === 'cool' ? 'var(--cool)' : st.kind === 'light' ? '#ffd54f' : 'var(--accent)';
   const turning = Date.now() - (S.lastTurn[st.id] || 0) < 1500;
-  const primary = turning ? (st.unit === '°C' ? v.toFixed(1) + '°' : Math.round(v) + st.unit) : st.primary;
+  const primary = turning ? (st.unit === '°C' ? (st.min < 0 && v > 0 ? '+' : '') + v.toFixed(1) + '°' : Math.round(v) + st.unit) : st.primary;
   const modes = !st.modes ? '' : st.modes.length <= 3
     ? `<div class="modes">${st.modes.map(m => `<span class="mode ${m === st.mode ? 'on' : ''}">${m}</span>`).join('')}</div>`
     : `<div class="modes"><span class="mode">‹</span><span class="mode ${st.mode ? 'on' : ''}">${esc(st.mode || 'Presets')}</span><span class="mode">›</span></div>`;
