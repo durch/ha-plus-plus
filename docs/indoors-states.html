@@ -88,7 +88,7 @@
         <text x="614" y="190" text-anchor="middle" font-size="13" font-weight="600" fill="currentColor">tap</text>
         <path d="M755,280 L755,428 L135,428 L135,282" fill="none" stroke="currentColor" stroke-width="1.6" marker-end="url(#ar)"/>
         <text x="640" y="420" text-anchor="middle" font-size="13" font-weight="600" fill="currentColor">tap</text>
-        <text x="240" y="420" text-anchor="middle" font-size="12" fill="var(--muted)">devices switch 1.5 s after the last tap</text>
+        <text x="270" y="420" text-anchor="middle" font-size="12" fill="var(--muted)">devices switch 1.5 s after the last tap · double tap = back</text>
       </svg>
       </div>
       <figcaption>Tap cycles Off → Heat → Cool → Off. The schedule only acts in Heat. Entering Heat applies Wake or Sleep for the current time straight away.</figcaption>
@@ -117,7 +117,12 @@
               <td>Waits 1.5 s, then acts</td>
               <td>Schedule switch stays off</td>
               <td>ACs off, floors off</td></tr>
-          <tr><td>Tap twice quickly<br><span class="tag h">Heat</span>→<span class="tag o">Off</span></td>
+          <tr><td>Double tap<br>(two taps within ¼ s)</td>
+              <td>Goes back one level</td>
+              <td class="none">none</td>
+              <td class="none">none</td>
+              <td class="none">none</td></tr>
+          <tr><td>Tap, pause, tap<br><span class="tag h">Heat</span>→<span class="tag o">Off</span></td>
               <td>Passes through Cool on screen</td>
               <td>Only the final state is applied</td>
               <td>Schedule switch → off</td>
