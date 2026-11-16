@@ -382,12 +382,29 @@ class LightControl(Control):
     name_override: str | None = None
     icon: str = "lightbulb"
     scenes: dict[str, str] = field(default_factory=dict)  # preset name -> scene entity
+    hue_group: str | None = None   # discover every Hue scene of this room (see discover())
     kind: str = "light"
     active_scene: str | None = None
 
     @property
     def id(self) -> str:  # type: ignore[override]
         return self.entity
+
+    def discover(self, all_states: list[dict]) -> set[str]:
+        """Add every Hue scene of this room after the configured ones (which keep their
+        names and come first). Returns the scene entities to watch."""
+        if self.hue_group:
+            known = set(self.scenes.values())
+            found = sorted(
+                (s for s in all_states
+                 if s["entity_id"].startswith("scene.") and s["entity_id"] not in known
+                 and (s.get("attributes") or {}).get("group_name") == self.hue_group),
+                key=lambda s: str(s["attributes"].get("name", "")).lower())
+            for s in found:
+                name = str(s["attributes"].get("name") or s["entity_id"].split(".", 1)[1])
+                if name not in self.scenes:
+                    self.scenes[name] = s["entity_id"]
+        return set(self.scenes.values())
 
     def name_for(self, states: States) -> str:
         return self.name_override or _friendly(states, self.entity)
@@ -557,7 +574,7 @@ def build(config: dict) -> Layout:
             ctl = LightControl(item)
         else:
             ctl = LightControl(item["entity"], item.get("name"), item.get("icon", "lightbulb"),
-                               dict(item.get("presets", {})))
+                               dict(item.get("presets", {})), item.get("hue_group"))
         controls[ctl.id] = ctl
         ids.append(ctl.id)
     if ids:

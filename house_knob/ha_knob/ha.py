@@ -23,6 +23,7 @@ class HAClient:
         self.token = token
         self.watch = watch
         self.on_change = on_change
+        self.discover: Callable[[list[dict]], set[str]] | None = None
         self.states: dict[str, dict] = {}
         self.connected = asyncio.Event()
         self._ws: aiohttp.ClientWebSocketResponse | None = None
@@ -75,6 +76,8 @@ class HAClient:
             try:
                 await self._send({"type": "subscribe_events", "event_type": "state_changed"})
                 states = await self._send({"type": "get_states"})
+                if self.discover:   # controls may want more entities once they see what exists
+                    self.watch |= self.discover(states)
                 self.states = {s["entity_id"]: s for s in states if s["entity_id"] in self.watch}
                 missing = self.watch - self.states.keys()
                 if missing:

@@ -64,35 +64,18 @@ climate:
       entities:
         - climate.580d0d34e617   # terrace AC
 
-lights:                      # Hue rooms; presets = Hue scenes (swipe to cycle)
-  - entity: light.terasa
+lights:                      # Hue rooms. Every Hue scene of the room becomes a preset
+  - entity: light.terasa     # (rest on the centre and turn); `presets` pins some first.
     name: Terasa
-    presets:
-      Energize: scene.terasa_energize
-      Concentrate: scene.terasa_concentrate
-      Read: scene.terasa_read
-      Relax: scene.terasa_relax
-      Rest: scene.terasa_rest
-      Dreamy dusk: scene.terasa_terasa_dreamy_dusk
-      Nightlight: scene.terasa_nightlight
+    hue_group: Terasa
   - entity: light.ambiance
     name: Ambiance
+    hue_group: Ambiance
     presets:
       Božić: scene.ambiance_bozic
-      Energize: scene.ambiance_energize
-      Concentrate: scene.ambiance_concentrate
-      Read: scene.ambiance_read
-      Relax: scene.ambiance_relax
-      Rest: scene.ambiance_rest
-      Dreamy dusk: scene.ambiance_dreamy_dusk
-      Savanna sunset: scene.ambiance_ambiance_savanna_sunset
-      Nightlight: scene.ambiance_nightlight
   - entity: light.reflektor
     name: Reflektor
-    presets:
-      Energize: scene.reflektor_energize
-      Concentrate: scene.reflektor_concentrate
-      Read: scene.reflektor_read
+    hue_group: Reflektor
 
 covers:                      # each group moves all three roof windows' units together
   - id: windows

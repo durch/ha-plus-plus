@@ -29,6 +29,8 @@ class Bridge:
         self.knobs: set[web.WebSocketResponse] = set()
         watch = set().union(*(c.entities() for c in layout.controls.values()))
         self.ha = HAClient(ha_url, token, watch, self._on_ha_change)
+        self.ha.discover = lambda states: set().union(
+            *(c.discover(states) for c in layout.controls.values() if hasattr(c, "discover")))
         self._pending_adjust: dict[str, float] = {}
         self._adjust_tasks: dict[str, asyncio.Task] = {}
         layout_json = json.dumps(layout.sections, sort_keys=True).encode()

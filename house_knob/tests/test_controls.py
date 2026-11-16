@@ -120,7 +120,12 @@ async def test_light_group_presets(layout):
                               friendly_name="Ambiance", lights=["a", "b", "c"])}
     out = light.state(s)
     assert out["primary"] == "50%" and out["secondary"] == "3 lights"
-    assert "Relax" in out["modes"] and out["mode"] == ""
+    light.discover([{"entity_id": "scene.ambiance_relax", "attributes": {"group_name": "Ambiance", "name": "Relax"}},
+                    {"entity_id": "scene.ambiance_bozic", "attributes": {"group_name": "Ambiance", "name": "Bozic"}},
+                    {"entity_id": "scene.terasa_relax", "attributes": {"group_name": "Terasa", "name": "Relax"}},
+                    {"entity_id": "scene.ambiance_dusk", "attributes": {"group_name": "Ambiance", "name": "Dreamy dusk"}}])
+    out = light.state(s)
+    assert out["modes"] == ["Božić", "Dreamy dusk", "Relax"] and out["mode"] == ""
     rec = Rec()
     await light.set_mode(s, "Relax", rec)
     assert rec.calls == [("scene", "turn_on", {"entity_id": "scene.ambiance_relax"})]
