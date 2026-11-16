@@ -74,24 +74,24 @@
         <line x1="480" y1="262" x2="480" y2="192" stroke="currentColor" stroke-width="1.3" marker-end="url(#ar)"/>
         <text x="488" y="230" font-size="12" fill="currentColor">06:00</text>
         <text x="450" y="364" text-anchor="middle" font-size="12" fill="var(--muted)">turn: nudge all floors ± (until next switch)</text>
-        <text x="450" y="382" text-anchor="middle" font-size="12" fill="var(--muted)">long-press: nudge is added to the offsets</text>
+        <text x="450" y="382" text-anchor="middle" font-size="12" fill="var(--muted)">rest on centre: nudge joins the offsets</text>
         <!-- Cool -->
         <rect x="660" y="140" width="190" height="140" rx="10" fill="var(--cool-bg)" stroke="var(--cool)" stroke-width="1.5"/>
         <text x="755" y="172" text-anchor="middle" font-size="18" font-weight="600" fill="var(--cool)">COOL</text>
         <text x="755" y="200" text-anchor="middle" font-size="13" fill="currentColor">ACs on · floors off</text>
         <text x="755" y="222" text-anchor="middle" font-size="13" font-weight="600" fill="currentColor">schedule switch OFF</text>
-        <text x="755" y="244" text-anchor="middle" font-size="12" fill="var(--muted)">turn: nudge all 3 ACs ±</text>
+        <text x="755" y="244" text-anchor="middle" font-size="12" fill="var(--muted)">turn: set the target, e.g. 24°</text>
         <!-- taps -->
         <line x1="240" y1="200" x2="328" y2="200" stroke="currentColor" stroke-width="1.6" marker-end="url(#ar)"/>
-        <text x="284" y="190" text-anchor="middle" font-size="13" font-weight="600" fill="currentColor">tap</text>
+        <text x="284" y="190" text-anchor="middle" font-size="13" font-weight="600" fill="currentColor">tap centre</text>
         <line x1="570" y1="200" x2="658" y2="200" stroke="currentColor" stroke-width="1.6" marker-end="url(#ar)"/>
-        <text x="614" y="190" text-anchor="middle" font-size="13" font-weight="600" fill="currentColor">tap</text>
+        <text x="614" y="190" text-anchor="middle" font-size="13" font-weight="600" fill="currentColor">tap centre</text>
         <path d="M755,280 L755,428 L135,428 L135,282" fill="none" stroke="currentColor" stroke-width="1.6" marker-end="url(#ar)"/>
-        <text x="640" y="420" text-anchor="middle" font-size="13" font-weight="600" fill="currentColor">tap</text>
-        <text x="270" y="420" text-anchor="middle" font-size="12" fill="var(--muted)">devices switch 1.5 s after the last tap · double tap = back</text>
+        <text x="640" y="420" text-anchor="middle" font-size="13" font-weight="600" fill="currentColor">tap centre</text>
+        <text x="270" y="420" text-anchor="middle" font-size="12" fill="var(--muted)">devices switch 1.5 s after the last tap</text>
       </svg>
       </div>
-      <figcaption>Tap cycles Off → Heat → Cool → Off. The schedule only acts in Heat. Entering Heat applies Wake or Sleep for the current time straight away.</figcaption>
+      <figcaption>With Indoors selected, a tap on the centre cycles Off → Heat → Cool → Off. The schedule only acts in Heat. Entering Heat applies Wake or Sleep for the current time straight away.</figcaption>
     </figure>
   </section>
 
@@ -102,50 +102,53 @@
       <table>
         <thead><tr><th>Gesture</th><th>Knob</th><th>Bridge</th><th>HA helpers</th><th>Devices</th></tr></thead>
         <tbody>
-          <tr><td>Tap <span class="tag o">Off</span>→<span class="tag h">Heat</span></td>
+          <tr><td>Tap a wedge</td>
+              <td>Selects that thing (white inner edge). The centre now shows it</td>
+              <td class="none">none</td><td class="none">none</td><td class="none">none. Touching a wedge never changes the house</td></tr>
+          <tr><td>Tap the centre<br><span class="tag o">Off</span>→<span class="tag h">Heat</span></td>
               <td>Shows Heat at once</td>
               <td>Waits 1.5 s for more taps, then acts</td>
               <td>Schedule switch → on</td>
               <td>Floors on, each set to the Wake or Sleep set point plus its own offset</td></tr>
-          <tr><td>Tap <span class="tag h">Heat</span>→<span class="tag c">Cool</span></td>
+          <tr><td>Tap the centre<br><span class="tag h">Heat</span>→<span class="tag c">Cool</span></td>
               <td>Shows Cool at once</td>
               <td>Waits 1.5 s, then acts</td>
               <td>Schedule switch → off</td>
-              <td>Floors off, 3 ACs to cool. Your existing automation closes the roof windows</td></tr>
-          <tr><td>Tap <span class="tag c">Cool</span>→<span class="tag o">Off</span></td>
+              <td>Floors off, 3 ACs to cool at the Cool target. Your existing automation closes the roof windows</td></tr>
+          <tr><td>Tap the centre<br><span class="tag c">Cool</span>→<span class="tag o">Off</span></td>
               <td>Shows Off at once</td>
               <td>Waits 1.5 s, then acts</td>
               <td>Schedule switch stays off</td>
               <td>ACs off, floors off</td></tr>
-          <tr><td>Double tap<br>(two taps within ¼ s)</td>
-              <td>Goes back one level</td>
-              <td class="none">none</td>
-              <td class="none">none</td>
-              <td class="none">none</td></tr>
-          <tr><td>Tap, pause, tap<br><span class="tag h">Heat</span>→<span class="tag o">Off</span></td>
+          <tr><td>Two taps in a row<br><span class="tag h">Heat</span>→<span class="tag o">Off</span></td>
               <td>Passes through Cool on screen</td>
               <td>Only the final state is applied</td>
               <td>Schedule switch → off</td>
               <td>Floors off. ACs never start</td></tr>
-          <tr><td>Turn</td>
+          <tr><td>Turn, in <span class="tag h">Heat</span></td>
               <td>Shows the nudge, e.g. +1.0°</td>
-              <td>Adds the same amount to every device of the active mode</td>
+              <td>Adds the same amount to every floor</td>
               <td class="none">none</td>
-              <td>Each setpoint moves by the nudge. Lasts until the next 06:00 or 23:00 in Heat</td></tr>
-          <tr><td>Long-press<br>(Save as default)</td>
-              <td>Shows “Saved”</td>
+              <td>Each floor setpoint moves by the nudge. Lasts until the next 06:00 or 23:00</td></tr>
+          <tr><td>Turn, in <span class="tag c">Cool</span></td>
+              <td>Shows the target, e.g. 24°</td>
+              <td>Sets that target on every AC</td>
+              <td class="none">none</td>
+              <td>All ACs get the same whole-degree setpoint</td></tr>
+          <tr><td>Rest a finger on the centre<br>(about 1 s, in Heat with a nudge)</td>
+              <td>Shows “Saved +1.0°”</td>
               <td>Adds the nudge to every floor’s offset, resets the nudge to 0</td>
               <td>offset_dnevni, offset_dnevni_2, offset_hodnik each += nudge</td>
               <td class="none">none. They already sit at the nudged value, and now every later Wake, Sleep and Away keeps it</td></tr>
           <tr><td>06:00 / 23:00<br>(no gesture)</td>
-              <td>Nudge label clears on next update</td>
+              <td>Nudge clears on next update</td>
               <td class="none">none</td>
               <td>Schedule reads set point + offsets, only if the switch is on</td>
               <td>Each floor = Wake or Sleep set point + its own offset</td></tr>
         </tbody>
       </table>
       </div>
-      <figcaption>The bridge is the only part that talks to both sides. The knob only draws and reports gestures.</figcaption>
+      <figcaption>The knob only works on the thing you touched last, and for about 8 seconds after you let go. With nothing selected, turning it does nothing.</figcaption>
     </figure>
   </section>
 
@@ -177,8 +180,8 @@
       <li>House mode Away is unchanged: it sets the floors to the away temperature regardless of the knob.</li>
       <li>One offset per thermostat means every floor has the same gap between Wake and Sleep (3° today). A floor cannot have its own night drop.</li>
       <li>The knob cannot change the Wake or Sleep set points themselves, only shift everything warmer or cooler.</li>
-      <li>The big number on the knob is the Netatmo Oxymoron room temperature. It is display only and does not steer anything.</li>
-      <li>Outdoors has no schedule. Its Off simply switches the heaters and the terrace AC off.</li>
+      <li>In Heat the big number is the Netatmo Oxymoron room temperature, which is display only. In Cool it is the target you set.</li>
+      <li>Outdoors has no schedule and no offsets. In both Heat and Cool the knob sets an absolute target on the heaters or the terrace AC, and Off switches them off.</li>
     </ul>
   </section>
 
