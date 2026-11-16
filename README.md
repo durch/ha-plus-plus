@@ -24,15 +24,22 @@ What the knob controls is defined in [house_knob/knob.yaml](house_knob/knob.yaml
 
 | Path | What |
 |---|---|
-| `house_knob/ha_knob/controls.py` | Control model + climate group logic (pure, tested) |
-| `house_knob/ha_knob/ha.py` | HA WebSocket client (state cache, service calls) |
-| `house_knob/ha_knob/server.py` | hk/1 WebSocket server, OTA endpoints |
-| `house_knob/ha_knob/sim/` | Browser simulator speaking hk/1 |
-| `firmware/` | Fork of roon-knob v2.8.4 (own git repo, branch `ha-knob`) |
+| `house_knob/` | The bridge, packaged as a Home Assistant add-on (`config.yaml`, `Dockerfile`, `run.sh`) |
+| `house_knob/knob.yaml` | What the knob controls: climate groups, lights and presets, cover groups, schedule helpers |
+| `house_knob/ha_knob/controls.py` | Control model and climate logic (pure, tested) |
+| `house_knob/ha_knob/ha.py` | HA WebSocket client; `--dry-run` and `--fake` modes |
+| `house_knob/ha_knob/server.py` | hk/1 WebSocket server, firmware OTA endpoints, simulator |
+| `house_knob/ha_knob/snapshot.py` | Save / restore the state of everything the knob can touch |
+| `house_knob/ha_knob/sim/concepts/` | Browser simulator (`touch-and-turn.html`) and the concepts considered |
+| `scripts/` | One-off HA migrations |
+| `docs/` | [Protocol](docs/PROTOCOL.md), [deploying](docs/DEPLOY.md), [firmware notes](docs/FIRMWARE.md) |
 
-## Home Assistant add-on
+The knob's firmware is a private fork of roon-knob and is not in this repository.
 
-`ha++` is an HA add-on repository (`repository.yaml`); `house_knob/` is the add-on
-(Dockerfile, `config.yaml` manifest, `run.sh`). On HA the bridge talks to Core via
-the Supervisor (no token), keeps its config at `addon_configs/<slug>/knob.yaml`, and
-serves firmware for OTA from `addon_configs/<slug>/firmware/`.
+## Bridge modes
+
+| Mode | Reads | Writes |
+|---|---|---|
+| (default) | live HA | live HA |
+| `--dry-run` | live HA | nothing: commands change a local copy only |
+| `--fake <snapshot.json>` | a snapshot file | nothing; needs no HA at all |

@@ -150,8 +150,10 @@ class Bridge:
         app.router.add_get("/firmware/version", self.firmware_version)
         app.router.add_get("/firmware/download", self.firmware_download)
         app.router.add_get("/healthz", self.health)
+        # The simulator is the knob's real interaction model in a browser; the other
+        # concepts explored on the way are kept beside it for reference.
         app.router.add_get("/", lambda r: web.HTTPFound("/sim/"))
-        app.router.add_get("/sim/", lambda r: web.FileResponse(ROOT / "sim" / "index.html"))
+        app.router.add_get("/sim/", lambda r: web.FileResponse(ROOT / "sim" / "concepts" / "touch-and-turn.html"))
         app.router.add_get("/sim/concepts/", lambda r: web.FileResponse(ROOT / "sim" / "concepts" / "index.html"))
         app.router.add_static("/sim/concepts/", ROOT / "sim" / "concepts")
 

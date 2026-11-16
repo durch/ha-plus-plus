@@ -10,8 +10,9 @@ from __future__ import annotations
 import asyncio
 import datetime as _dt
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable  # noqa: F401
+from typing import Any
 
 Call = Callable[[str, str, dict], Awaitable[Any]]
 States = dict[str, dict]
@@ -151,12 +152,6 @@ class ClimateControl(Control):
             if _avail(states, m.entity) and isinstance(t, (int, float)):
                 out[m.entity] = float(t)
         return out
-
-    def _value(self, states: States, group: ModeGroup) -> float:
-        sp = self._setpoints(states, group)
-        if not sp:
-            return _snap((group.min + group.max) / 2, group.min, group.max, group.step)
-        return _snap(sum(sp.values()) / len(sp), group.min, group.max, group.step)
 
     def _room_temp(self, states: States) -> float | None:
         if self.sensor and _avail(states, self.sensor):

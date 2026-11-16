@@ -1,6 +1,6 @@
-# House Knob protocol (hk/1) — draft
+# House Knob protocol (hk/1)
 
-Status: DRAFT for review. Purpose-built for house control; reuses roon-knob's
+Purpose-built for house control; reuses roon-knob's
 *principles*, not its API.
 
 ## Principles kept from roon-knob
@@ -63,28 +63,39 @@ Knob reconnects with backoff (1s → 30s). On (re)connect the bridge sends
 ## Knob → bridge
 
 ```jsonc
-{"t":"adjust","seq":17,"id":"house","value":21.5}   // absolute; bridge debounces ~400 ms
-{"t":"toggle","seq":18,"id":"light.kuca"}           // on/off, open/close, climate on (last mode)/off
-{"t":"mode","seq":19,"id":"house","mode":"cool"}
-{"t":"focus","id":"house"}                          // optional: bridge may prioritise updates
-{"t":"status","battery":82,"charging":false,"rssi":-61}
+{"t":"adjust","seq":17,"id":"indoors","value":1.5}     // absolute value of the control's gauge; bridge debounces ~350 ms
+{"t":"toggle","seq":18,"id":"light.ambiance"}          // lights: on/off. climate: next of Off → Heat → Cool
+{"t":"mode","seq":19,"id":"light.ambiance","mode":"Relax"}   // a light preset (or a climate mode, directly)
+{"t":"action","seq":20,"id":"indoors","name":"save_default"} // fold the nudge into the offsets
 ```
 
-## Knob UI (round 360×360)
+Covers take `adjust` with 0 or 100. Climate `toggle` is applied 1.5 s after the last
+one, so cycling through Cool on the way to Off never starts the ACs. Every command is
+answered with `{"t":"ack","seq":…,"ok":…,"message":…}`; a message, when present, is
+shown briefly on the knob.
 
-- **Home**: sections as a ring/list; rotate to choose, tap to enter.
-- **Control screen**: arc = `value` within `min..max`; centre = `primary`; below = `secondary`; amber banner = `warning`.
-  - Rotate: adjust value (velocity-sensitive, as roon-knob).
-  - Tap: toggle.
-  - Swipe left/right: cycle `modes` (climate only).
-  - Press knob: back to section list.
+## What `value` means
+
+| Control | `value` | Range |
+|---|---|---|
+| Light | brightness % | 0–100, step 5 |
+| Cover group | 0 = down / closed, 100 = up / open | step 100 |
+| Climate, relative group (Indoors heat) | nudge applied to every device, in lockstep | −5…+5 |
+| Climate, absolute group (all cooling, Outdoors heat) | the target set on every device | the group's min…max |
+
+## Knob UI
+
+The interaction model is "touch and turn": eight wedges select, the hub toggles, the
+ring adjusts. It is specified by its tests (`firmware/tests/test_hk_tt.c`) and can be
+tried in a browser at `/sim/` on a running bridge. The other concepts considered are
+under `/sim/concepts/`.
 
 ## Climate logic (bridge)
 
 | Control | Heat drives | Cool drives |
 |---|---|---|
-| House | floor: Dnevni, Dnevni 2, Hodnik | ACs: Klima Dnevni, Spavaća, Klinci |
-| Terrace | Heater, Wonderwall Art Smart ×2 (`heat_cool` mode) | AC `580d0d34e617` |
+| Indoors | floors Dnevni, Dnevni 2, Hodnik. Relative nudge; schedule via HA helpers (set point + per-floor offset, `input_boolean.indoors_schedule`) | ACs Dnevni, Spavaća, Klinci. Absolute target |
+| Outdoors | Heater, Wonderwall ×2 (`heat_cool` mode). Absolute target | terrace AC. Absolute target |
 
-Switching mode turns the other group off. `value` is the shared setpoint for the
-active group. House heat shows a warning while any roof window is open.
+Switching mode turns the other group off. Indoors heat shows a warning while a roof
+window is open. See [DEPLOY.md](DEPLOY.md) for the helpers and the schedule.

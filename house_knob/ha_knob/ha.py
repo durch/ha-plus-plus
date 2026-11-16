@@ -6,7 +6,7 @@ from __future__ import annotations
 import asyncio
 import itertools
 import logging
-from typing import Awaitable, Callable
+from collections.abc import Awaitable, Callable
 
 import aiohttp
 
