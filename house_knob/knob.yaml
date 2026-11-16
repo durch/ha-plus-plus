@@ -41,6 +41,8 @@ climate:
 
   - id: outdoors
     name: Outdoors
+    # TODO(on site): a Netatmo module is being added on the terrace; set `sensor:` to it.
+    # Display only ("Now x°"); until then the devices' own readings are shown.
     icon: deck
     heat:
       min: 10
