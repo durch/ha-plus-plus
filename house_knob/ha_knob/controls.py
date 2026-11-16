@@ -202,7 +202,7 @@ class ClimateControl(Control):
         if mode == "off":
             secondary = "Off"
         elif abs(offset) < 1e-6:
-            secondary = "Turn to adjust"
+            secondary = ""
         else:
             secondary = f"{'Warmer' if offset > 0 else 'Cooler'} {offset:+.1f}°"
         return {
