@@ -44,9 +44,8 @@ climate:
 
   - id: outdoors
     name: Outdoors
-    # TODO(on site): a Netatmo module is being added on the terrace; set `sensor:` to it.
-    # Display only ("Now x°"); until then the devices' own readings are shown.
-    icon: deck
+    sensor: sensor.oxymoron_outdoor_module_temperature   # Netatmo "Oxymoron" outdoor module; display only
+    # TODO(on site): a dedicated Netatmo module is planned for the terrace; switch `sensor:` to it then.
     heat:
       min: 10
       max: 30
