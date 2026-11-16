@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>House Knob Sim</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0,0">
+<style>
+  :root { --bg:#111; --fg:#eee; --dim:#888; --accent:#4fc3f7; --heat:#ff8a50; --cool:#4fc3f7; --warn:#ffb300; --off:#555; }
+  body { margin:0; min-height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center;
+         gap:16px; background:#222; color:var(--fg); font-family:system-ui,sans-serif; }
+  #knob { width:360px; height:360px; border-radius:50%; background:var(--bg); position:relative; overflow:hidden;
+          box-shadow:0 0 0 14px #333, 0 0 0 16px #555; user-select:none; cursor:pointer; outline:none; }
+  svg { position:absolute; inset:0; }
+  .center { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:60px; }
+  .icon { font-family:'Material Symbols Rounded'; font-size:34px; color:var(--dim); }
+  .name { font-size:17px; color:var(--dim); margin-top:2px; }
+  .primary { font-size:54px; font-weight:600; line-height:1.1; }
+  .secondary { font-size:16px; color:var(--dim); min-height:20px; }
+  .modes { display:flex; gap:8px; margin-top:10px; }
+  .mode { font-size:13px; padding:3px 9px; border-radius:10px; background:#222; color:var(--dim); }
+  .mode.on { background:var(--accent); color:#000; }
+  .warn { position:absolute; left:0; right:0; bottom:46px; text-align:center; color:var(--warn); font-size:14px; }
+  .list .item { font-size:20px; color:var(--dim); padding:4px 0; }
+  .list .item.sel { font-size:26px; color:var(--fg); }
+  .status { position:absolute; top:34px; left:0; right:0; text-align:center; font-size:12px; color:var(--dim); }
+  .help { font-size:13px; color:#999; max-width:460px; text-align:center; line-height:1.5; }
+  kbd { background:#333; border-radius:3px; padding:0 4px; }
+</style>
+</head>
+<body>
+<div id="knob" tabindex="0"></div>
+<div id="mode" class="help" style="font-weight:600"></div>
+<div class="help">
+  <kbd>wheel</kbd>/<kbd>↑↓</kbd> turn knob · <kbd>click</kbd>/<kbd>space</kbd> tap screen ·
+  <kbd>enter</kbd> press knob (enter / back) · <kbd>←→</kbd> swipe (climate mode / light preset) · <kbd>esc</kbd> back
+</div>
+<script>
+const el = document.getElementById('knob');
+const S = { dry:false, conn:false, sections:[], states:{}, view:'home', section:0, control:0, local:{}, lastTurn:{}, ack:null };
+let ws, seq = 0;
+
+function connect() {
+  ws = new WebSocket(`ws://${location.host}/knob/ws?knob_id=sim&fw=sim`);
+  ws.onopen = () => { S.conn = true; render(); };
+  ws.onclose = () => { S.conn = false; render(); setTimeout(connect, 1500); };
+  ws.onmessage = ev => {
+    const m = JSON.parse(ev.data);
+    if (m.t === 'hello') { S.dry = !!m.dry_run; document.getElementById('mode').textContent = S.dry ? 'DRY RUN: nothing is sent to Home Assistant' : 'LIVE: changes your house'; document.getElementById('mode').style.color = S.dry ? '#8bc34a' : '#ff7043'; }
+    else if (m.t === 'layout') S.sections = m.sections;
+    else if (m.t === 'state') S.states[m.id] = m;
+    else if (m.t === 'ack' && !m.ok) { S.ack = m.message; setTimeout(() => { S.ack = null; render(); }, 2500); }
+    render();
+  };
+}
+const send = m => ws && ws.readyState === 1 && ws.send(JSON.stringify({ ...m, seq: ++seq }));
+const curId = () => S.sections[S.section]?.controls[S.control];
+// Knob keeps its own prediction for 1.5 s after the last turn, then trusts the bridge.
+function value(st) {
+  return (Date.now() - (S.lastTurn[st.id] || 0) < 1500 && S.local[st.id] != null) ? S.local[st.id] : st.value;
+}
+
+let lastTick = 0;
+function turn(dir) {
+  const now = Date.now(), fast = now - lastTick < 60; lastTick = now;
+  if (S.view === 'home') { S.section = (S.section + dir + S.sections.length) % S.sections.length; return render(); }
+  if (S.view === 'list') { const n = S.sections[S.section].controls.length; S.control = (S.control + dir + n) % n; return render(); }
+  const st = S.states[curId()]; if (!st || !st.adjustable) return;
+  let v = value(st) + dir * st.step * (fast ? 2 : 1);
+  v = Math.min(st.max, Math.max(st.min, Math.round(v / st.step) * st.step));
+  S.local[st.id] = v; S.lastTurn[st.id] = now;
+  send({ t:'adjust', id:st.id, value:v }); render();
+}
+function press() {   // knob press: enter / back
+  if (S.view === 'home') { S.view = 'list'; S.control = 0; }
+  else if (S.view === 'list') S.view = 'control';
+  else S.view = 'list';
+  render();
+}
+function back() { S.view = S.view === 'control' ? 'list' : 'home'; render(); }
+function tap() { if (S.view !== 'control') return press(); send({ t:'toggle', id:curId() }); }
+function swipe(dir) {
+  const st = S.states[curId()]; if (S.view !== 'control' || !st?.modes) return;
+  const n = st.modes.length, i = st.modes.indexOf(st.mode);
+  const next = i < 0 ? (dir > 0 ? 0 : n - 1) : (i + dir + n) % n;
+  send({ t:'mode', id:st.id, mode: st.modes[next] });
+}
+
+el.addEventListener('wheel', e => { e.preventDefault(); turn(e.deltaY > 0 ? 1 : -1); }, { passive:false });
+el.addEventListener('click', tap);
+document.addEventListener('keydown', e => {
+  const k = { ArrowUp:() => turn(1), ArrowDown:() => turn(-1), ' ':tap, Enter:press, Escape:back,
+              ArrowLeft:() => swipe(-1), ArrowRight:() => swipe(1) }[e.key];
+  if (k) { e.preventDefault(); k(); }
+});
+
+function arc(frac, color) {
+  const r = 165, c = 180, start = 135, sweep = 270;
+  const pt = a => { const t = (a - 90) * Math.PI / 180; return [c + r * Math.cos(t), c + r * Math.sin(t)]; };
+  const path = (a0, a1) => { const [x0,y0] = pt(a0), [x1,y1] = pt(a1); return `M${x0},${y0} A${r},${r} 0 ${a1 - a0 > 180 ? 1 : 0} 1 ${x1},${y1}`; };
+  const a0 = start + 90, a1 = a0 + sweep * Math.max(0.001, Math.min(1, frac));
+  return `<svg viewBox="0 0 360 360"><path d="${path(a0, a0 + sweep)}" stroke="#2a2a2a" stroke-width="10" fill="none" stroke-linecap="round"/>
+          <path d="${path(a0, a1)}" stroke="${color}" stroke-width="10" fill="none" stroke-linecap="round"/></svg>`;
+}
+const esc = s => String(s ?? '').replace(/[&<>]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;' }[c]));
+
+function render() {
+  if (!S.conn) { el.innerHTML = `<div class="center"><div class="icon">wifi_off</div><div class="name">Connecting to bridge…</div></div>`; return; }
+  const status = S.ack ? `<div class="status" style="color:var(--warn)">${esc(S.ack)}</div>` : '';
+  if (S.view === 'home' || S.view === 'list') {
+    const items = S.view === 'home'
+      ? S.sections.map(s => [s.icon, s.name])
+      : S.sections[S.section].controls.map(id => { const st = S.states[id] || {}; return [st.icon, `${st.name ?? id} · ${st.primary ?? ''}`]; });
+    const sel = S.view === 'home' ? S.section : S.control;
+    const rows = [-2, -1, 0, 1, 2].map(o => { const i = sel + o; if (i < 0 || i >= items.length) return '<div class="item">&nbsp;</div>';
+      return `<div class="item ${o === 0 ? 'sel' : ''}">${o === 0 ? `<span class="icon">${esc(items[i][0])}</span><br>` : ''}${esc(items[i][1])}</div>`; }).join('');
+    const title = S.view === 'home' ? 'House' : S.sections[S.section].name;
+    el.innerHTML = `${status}<div class="center list"><div class="name">${esc(title)}</div>${rows}</div>`;
+    return;
+  }
+  const st = S.states[curId()];
+  if (!st) { el.innerHTML = '<div class="center">…</div>'; return; }
+  const v = value(st), frac = (v - st.min) / (st.max - st.min);
+  const color = !st.on ? 'var(--off)' : st.mode === 'heat' ? 'var(--heat)' : st.mode === 'cool' ? 'var(--cool)' : st.kind === 'light' ? '#ffd54f' : 'var(--accent)';
+  const turning = Date.now() - (S.lastTurn[st.id] || 0) < 1500;
+  const primary = turning ? (st.unit === '°C' ? v.toFixed(1) + '°' : Math.round(v) + st.unit) : st.primary;
+  const modes = !st.modes ? '' : st.modes.length <= 3
+    ? `<div class="modes">${st.modes.map(m => `<span class="mode ${m === st.mode ? 'on' : ''}">${m}</span>`).join('')}</div>`
+    : `<div class="modes"><span class="mode">‹</span><span class="mode ${st.mode ? 'on' : ''}">${esc(st.mode || 'Presets')}</span><span class="mode">›</span></div>`;
+  el.innerHTML = `${st.adjustable ? arc(frac, color) : ''}${status}
+    <div class="center"><div class="icon">${esc(st.icon)}</div><div class="name">${esc(st.name)}</div>
+    <div class="primary" style="color:${st.available ? 'var(--fg)' : 'var(--dim)'}">${esc(st.available ? primary : 'Unavailable')}</div>
+    <div class="secondary">${esc(st.secondary)}</div>${modes}</div>
+    ${st.warning ? `<div class="warn">⚠ ${esc(st.warning)}</div>` : ''}`;
+  if (turning) setTimeout(render, 1600);
+}
+connect(); render(); el.focus();
+</script>
+</body>
+</html>

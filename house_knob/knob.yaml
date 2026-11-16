@@ -1,0 +1,101 @@
+# House Knob bridge configuration.
+# HA_URL / HA_TOKEN come from the environment (.envrc).
+
+listen:
+  host: 0.0.0.0
+  port: 8765
+
+climate:
+  - id: indoors
+    name: Indoors
+    sensor: sensor.dnevni_temperature   # Netatmo, authoritative room temperature
+    icon: home
+    warn_if_open:            # warn on the knob while heating and any of these are open
+      - cover.velux_window_roof_window
+      - cover.velux_window_roof_window_2
+      - cover.velux_window_roof_window_3
+    heat:
+      min: 15
+      max: 28
+      step: 0.5
+      entities:
+        - climate.dnevni
+        - climate.dnevni_2
+        - climate.hodnik
+    cool:
+      min: 18
+      max: 30
+      step: 1
+      entities:
+        - climate.9424b844f92c   # Klima - Dnevni
+        - climate.9424b82c5fa0   # Klima - Spavaća
+        - climate.9424b82e9242   # Klima - Klinci
+
+  - id: outdoors
+    name: Outdoors
+    icon: deck
+    heat:
+      min: 10
+      max: 30
+      step: 1
+      entities:
+        - climate.heater
+        - entity: climate.wonderwall_art_smart
+          hvac_mode: heat_cool
+        - entity: climate.wonderwall_art_smart_2
+          hvac_mode: heat_cool
+    cool:
+      min: 18
+      max: 30
+      step: 1
+      entities:
+        - climate.580d0d34e617   # terrace AC
+
+lights:                      # Hue rooms; presets = Hue scenes (swipe to cycle)
+  - entity: light.terasa
+    name: Terasa
+    presets:
+      Energize: scene.terasa_energize
+      Concentrate: scene.terasa_concentrate
+      Read: scene.terasa_read
+      Relax: scene.terasa_relax
+      Rest: scene.terasa_rest
+      Dreamy dusk: scene.terasa_terasa_dreamy_dusk
+      Nightlight: scene.terasa_nightlight
+  - entity: light.ambiance
+    name: Ambiance
+    presets:
+      Energize: scene.ambiance_energize
+      Concentrate: scene.ambiance_concentrate
+      Read: scene.ambiance_read
+      Relax: scene.ambiance_relax
+      Rest: scene.ambiance_rest
+      Dreamy dusk: scene.ambiance_dreamy_dusk
+      Savanna sunset: scene.ambiance_ambiance_savanna_sunset
+      Nightlight: scene.ambiance_nightlight
+  - entity: light.reflektor
+    name: Reflektor
+    presets:
+      Energize: scene.reflektor_energize
+      Concentrate: scene.reflektor_concentrate
+      Read: scene.reflektor_read
+
+covers:                      # each group moves all three roof windows' units together
+  - id: windows
+    name: Windows
+    icon: window
+    updown: true
+    labels: [Closed, Open]
+    entities: [cover.velux_window_roof_window, cover.velux_window_roof_window_2, cover.velux_window_roof_window_3]
+  - id: blinds
+    name: Blinds
+    icon: blinds
+    updown: true
+    labels: [Down, Up]
+    entities: [cover.velux_internal_cover_blinds, cover.velux_internal_cover_blinds_2, cover.velux_internal_cover_blinds_3]
+  - id: shutters
+    name: Shutters
+    icon: roller_shades
+    updown: true
+    labels: [Down, Up]
+    entities: [cover.velux_external_cover_roller_shutter, cover.velux_external_cover_roller_shutter_2, cover.velux_external_cover_roller_shutter_3]

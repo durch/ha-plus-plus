@@ -1,0 +1,20 @@
+name: House Knob bridge
+version: "0.1.0"
+slug: house_knob
+description: Bridge between Home Assistant and the House Knob (ESP32-S3 rotary controller), hk/1 protocol
+url: https://github.com/durch/ha-plus-plus
+arch: [aarch64, amd64]
+init: false
+startup: application
+boot: auto
+homeassistant_api: true
+ports:
+  8765/tcp: 8765
+ports_description:
+  8765/tcp: Knob WebSocket, simulator (/sim/) and firmware OTA
+map:
+  - addon_config:rw
+options:
+  dry_run: false
+schema:
+  dry_run: bool

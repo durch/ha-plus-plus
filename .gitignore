@@ -1,0 +1,9 @@
+.envrc
+.env
+.venv/
+__pycache__/
+firmware/
+build-fw/
+build-fw.log
+state.json
+snapshots/
