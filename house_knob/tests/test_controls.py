@@ -53,8 +53,9 @@ async def test_set_mode_heat_keeps_setpoints_and_turns_cool_off(layout):
     rec = Rec()
     await house.set_mode(states, "heat", rec)
     assert rec.calls[0] == ("climate", "set_hvac_mode", {"entity_id": ["climate.9424b844f92c"], "hvac_mode": "off"})
-    assert {c[2]["entity_id"] for c in rec.calls[1:]} == {"climate.dnevni", "climate.dnevni_2", "climate.hodnik"}
-    assert all(c[1] == "set_hvac_mode" and c[2]["hvac_mode"] == "heat" for c in rec.calls[1:])
+    on = [c for c in rec.calls[1:] if c[0] == "climate"]
+    assert {c[2]["entity_id"] for c in on} == {"climate.dnevni", "climate.dnevni_2", "climate.hodnik"}
+    assert all(c[1] == "set_hvac_mode" and c[2]["hvac_mode"] == "heat" for c in on)
 
 
 async def test_switch_to_cool_skips_unavailable(layout):
@@ -63,7 +64,7 @@ async def test_switch_to_cool_skips_unavailable(layout):
     rec = Rec()
     await house.set_mode(states, "cool", rec)
     assert rec.calls[0][2] == {"entity_id": ["climate.dnevni"], "hvac_mode": "off"}
-    assert {c[2]["entity_id"] for c in rec.calls[1:]} == {"climate.9424b844f92c", "climate.9424b82c5fa0"}
+    assert {c[2]["entity_id"] for c in rec.calls[1:] if c[0] == "climate"} == {"climate.9424b844f92c", "climate.9424b82c5fa0"}
 
 
 async def test_lockstep_adjust_keeps_relative_offsets(layout):
@@ -171,22 +172,37 @@ async def test_tap_cycles_modes_and_only_applies_after_settling(layout, monkeypa
     assert house.state(s)["mode"] == "off"
     import asyncio
     await asyncio.sleep(0.15)
-    assert [(x[1], x[2]["hvac_mode"]) for x in rec.calls] == [("set_hvac_mode", "off")]
+    assert rec.calls[0] == ("input_boolean", "turn_off", {"entity_id": "input_boolean.indoors_schedule"})
+    assert [(x[1], x[2]["hvac_mode"]) for x in rec.calls if x[0] == "climate"] == [("set_hvac_mode", "off")]
     assert not any(x[2].get("hvac_mode") == "cool" for x in rec.calls)
 
 
-async def test_save_default_writes_schedule_helpers(layout, monkeypatch):
+SCHED = {"input_boolean.indoors_schedule": st("off"), "input_number.indoors_wake": st("25.0"),
+         "input_number.indoors_sleep": st("20.0"), "input_number.indoors_away": st("18.0"),
+         "input_number.offset_dnevni": st("0.0"), "input_number.offset_dnevni_2": st("0.5"),
+         "input_number.offset_hodnik": st("-1.0"), "input_select.house_mode": st("Home")}
+
+
+async def test_heat_turns_schedule_on_and_applies_set_point_plus_offset(layout, monkeypatch):
     house = layout.controls["indoors"]
-    s = house_states(**{"climate.dnevni": st("heat", temperature=27.0), "climate.dnevni_2": st("heat", temperature=24.5),
-                        "input_select.house_mode": st("Home")})
-    monkeypatch.setattr(type(house), "_period", lambda self, states: "day")
+    monkeypatch.setattr(type(house), "_period", lambda self, states: "wake")
+    s = house_states(**SCHED)
     rec = Rec()
-    assert await house.action(s, "save_default", rec) == "Saved as day default"
-    assert rec.calls == [
-        ("input_number", "set_value", {"entity_id": "input_number.dnevni_floor_day", "value": 27.0}),
-        ("input_number", "set_value", {"entity_id": "input_number.dnevni_2_floor_day", "value": 24.5})]
-    s["input_select.house_mode"] = st("Away")
-    monkeypatch.undo()
+    await house.set_mode(s, "heat", rec)
+    assert ("input_boolean", "turn_on", {"entity_id": "input_boolean.indoors_schedule"}) in rec.calls
+    temps = {c[2]["entity_id"]: c[2]["temperature"] for c in rec.calls if c[1] == "set_temperature"}
+    assert temps == {"climate.dnevni": 25.0, "climate.dnevni_2": 25.5, "climate.hodnik": 24.0}
     rec = Rec()
-    await house.action(s, "save_default", rec)
-    assert {c[2]["entity_id"] for c in rec.calls} == {"input_number.floor_away"}
+    await house.set_mode(s, "off", rec)
+    assert rec.calls[0] == ("input_boolean", "turn_off", {"entity_id": "input_boolean.indoors_schedule"})
+
+
+async def test_save_default_adds_nudge_to_every_offset(layout):
+    house = layout.controls["indoors"]
+    s = house_states(**SCHED, **{"climate.dnevni": st("heat", temperature=26.0)})
+    house.targets["heat"] = 1.0
+    rec = Rec()
+    assert await house.action(s, "save_default", rec) == "Saved +1.0°"
+    assert {c[2]["entity_id"]: c[2]["value"] for c in rec.calls} == {
+        "input_number.offset_dnevni": 1.0, "input_number.offset_dnevni_2": 1.5, "input_number.offset_hodnik": 0.0}
+    assert "heat" not in house.targets

@@ -12,12 +12,15 @@ climate:
     # When it is back, confirm which station/sensor it is (sensor.dnevni_temperature,
     # a Netatmo "Dnevni" station, is the one showing unavailable) and switch `sensor` to it.
     sensor: sensor.oxymoron_temperature   # Netatmo station "Oxymoron": authoritative room temperature
-    save_default:            # long-press: current floor setpoints become the schedule's values
-      away: input_number.floor_away
-      entities:
-        - {entity: climate.dnevni, day: input_number.dnevni_floor_day, night: input_number.dnevni_floor_night}
-        - {entity: climate.dnevni_2, day: input_number.dnevni_2_floor_day, night: input_number.dnevni_2_floor_night}
-    icon: home
+    schedule:                # HA helpers; floor setpoint = set point + that floor's offset
+      switch: input_boolean.indoors_schedule   # Off/Cool clear it, Heat sets it
+      wake: input_number.indoors_wake          # 06:00-23:00
+      sleep: input_number.indoors_sleep        # 23:00-06:00
+      away: input_number.indoors_away          # house mode Away
+      offsets:               # all assume Tuya floor calibration 0 on the thermostat
+        climate.dnevni: input_number.offset_dnevni
+        climate.dnevni_2: input_number.offset_dnevni_2
+        climate.hodnik: input_number.offset_hodnik
     warn_if_open:            # warn on the knob while heating and any of these are open
       - cover.velux_window_roof_window
       - cover.velux_window_roof_window_2

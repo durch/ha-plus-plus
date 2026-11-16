@@ -112,8 +112,10 @@ class ClimateControl(Control):
     # their automations read. [{entity, day, night}], plus house_mode/away helper.
     pending: tuple[str, float] | None = None   # (mode, monotonic deadline)
     _settle: Any = None
-    defaults: list[dict] = field(default_factory=list)
-    away_helper: str | None = None
+    # Heating schedule (HA helpers): a switch the schedule automations check, one set
+    # point per period, one offset per thermostat. Device setpoint = set point + offset.
+    # {switch, wake, sleep, away, offsets: {climate entity: input_number}}
+    schedule: dict = field(default_factory=dict)
     house_mode: str = "input_select.house_mode"
     # Exact (unrounded) per-device setpoints, so 0.5° knob steps accumulate on
     # devices that only take whole degrees.
@@ -122,7 +124,7 @@ class ClimateControl(Control):
     def entities(self) -> set[str]:
         ids = {m.entity for g in (self.heat, self.cool) for m in g.members}
         return (ids | set(self.warn_if_open) | ({self.sensor} if self.sensor else set())
-                | ({self.house_mode} if self.defaults else set()))
+                | self._schedule_entities())
 
     def _group(self, mode: str) -> ModeGroup:
         return self.heat if mode == "heat" else self.cool
@@ -214,31 +216,49 @@ class ClimateControl(Control):
             "primary": _fmt_temp(now),
             "secondary": secondary,
             "warning": warning,
-            "actions": ["save_default"] if self.defaults else [],
+            "actions": ["save_default"] if self.schedule else [],
         }
+
+    def _schedule_entities(self) -> set[str]:
+        sc = self.schedule
+        if not sc:
+            return set()
+        return {self.house_mode, sc["switch"], sc["wake"], sc["sleep"], sc["away"], *sc["offsets"].values()}
 
     def _period(self, states: States) -> str:
         if (states.get(self.house_mode) or {}).get("state") == "Away":
             return "away"
-        return "day" if 6 <= _dt.datetime.now().hour < 23 else "night"
+        return "wake" if 6 <= _dt.datetime.now().hour < 23 else "sleep"
+
+    @staticmethod
+    def _num(states: States, eid: str, default: float | None = None) -> float | None:
+        try:
+            return float(states[eid]["state"])
+        except (KeyError, TypeError, ValueError):
+            return default
 
     async def action(self, states: States, name: str, call: Call) -> str | None:
-        if name != "save_default" or not self.defaults:
+        """Save as default: fold the knob's nudge into every thermostat's offset, so each
+        later wake / sleep / away run keeps it."""
+        if name != "save_default" or not self.schedule:
             raise ValueError(f"{self.id} has no action {name!r}")
-        period = self._period(states)
-        saved = []
-        for d in self.defaults:
-            t = _attr(states, d["entity"], "temperature")
-            helper = self.away_helper if period == "away" else d.get(period)
-            if helper and isinstance(t, (int, float)):
-                await call("input_number", "set_value", {"entity_id": helper, "value": float(t)})
-                saved.append(f"{_fmt_temp(float(t))}")
-        if not saved:
-            raise ValueError("nothing to save")
-        self.targets.clear()  # the nudge is now the baseline
+        if self.shown_mode(states) != "heat":
+            raise ValueError("Only while heating")
+        nudge = self.targets.get("heat", 0.0)
+        if abs(nudge) < 1e-6:
+            return "Nothing to save"
+        for helper in self.schedule["offsets"].values():
+            cur = self._num(states, helper, 0.0)
+            await call("input_number", "set_value", {"entity_id": helper, "value": round(cur + nudge, 1)})
+        self.targets.pop("heat", None)
         if self.store:
             self.store()
-        return f"Saved as {period} default"
+        return f"Saved {nudge:+.1f}°"
+
+    async def _schedule_on(self, states: States, on: bool, call: Call) -> None:
+        if self.schedule:
+            await call("input_boolean", "turn_on" if on else "turn_off",
+                       {"entity_id": self.schedule["switch"]})
 
     async def adjust(self, states: States, value: float, call: Call) -> None:
         """Nudge every device of the active mode by the change in offset (lockstep)."""
@@ -274,14 +294,29 @@ class ClimateControl(Control):
     async def _apply(self, states: States, mode: str, call: Call) -> None:
         """Make `mode` active: switch its devices on (keeping their setpoints), the other group off."""
         if mode == "off":
+            await self._schedule_on(states, False, call)   # Off is final: no schedule runs
             for group in (self.heat, self.cool):
                 await self._off(states, group, call)
             return
         other = self._group("cool" if mode == "heat" else "heat")
         await self._off(states, other, call)
+        await self._schedule_on(states, mode == "heat", call)
+        base = self._num(states, self.schedule[self._period(states)]) if (self.schedule and mode == "heat") else None
         for m in self._group(mode).members:
-            if _avail(states, m.entity) and states[m.entity].get("state") != m.hvac_mode:
+            if not _avail(states, m.entity):
+                continue
+            offset_helper = self.schedule.get("offsets", {}).get(m.entity) if base is not None else None
+            if offset_helper:
+                # Entering Heat: straight to the schedule's value for this time of day.
+                target = base + self._num(states, offset_helper, 0.0)
+                await call("climate", "set_temperature",
+                           {"entity_id": m.entity, "temperature": target, "hvac_mode": m.hvac_mode})
+            elif states[m.entity].get("state") != m.hvac_mode:
                 await call("climate", "set_hvac_mode", {"entity_id": m.entity, "hvac_mode": m.hvac_mode})
+        if mode == "heat" and self.schedule:
+            self.targets.pop("heat", None)   # fresh from the schedule: no nudge yet
+            if self.store:
+                self.store()
         self.last_mode = mode
 
     async def _off(self, states: States, group: ModeGroup, call: Call) -> None:
@@ -483,8 +518,7 @@ def build(config: dict) -> Layout:
         ctl = ClimateControl(c["id"], c["name"], c.get("icon", "thermostat"),
                              _group(c["heat"], "heat"), _group(c["cool"], "cool"),
                              list(c.get("warn_if_open", [])), c.get("sensor"))
-        ctl.defaults = list(c.get("save_default", {}).get("entities", []))
-        ctl.away_helper = c.get("save_default", {}).get("away")
+        ctl.schedule = dict(c.get("schedule", {}))
         controls[ctl.id] = ctl
         ids.append(ctl.id)
     if ids:
