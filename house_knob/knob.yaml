@@ -78,6 +78,7 @@ lights:                      # Hue rooms; presets = Hue scenes (swipe to cycle)
   - entity: light.ambiance
     name: Ambiance
     presets:
+      Božić: scene.ambiance_bozic
       Energize: scene.ambiance_energize
       Concentrate: scene.ambiance_concentrate
       Read: scene.ambiance_read
