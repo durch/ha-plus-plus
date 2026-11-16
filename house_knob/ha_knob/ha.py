@@ -29,7 +29,18 @@ class HAClient:
         self.dry_run = False
         self._touched: set[str] = set()
 
+    def load_fake(self, snapshot: dict) -> None:
+        """Offline mode: no HA at all. Seed state from a snapshot file and accept every
+        command optimistically (an "it all works" bridge for testing the physical knob)."""
+        self.fake = True
+        self.dry_run = True
+        self.states = {s["entity_id"]: s for s in snapshot["states"] if s["entity_id"] in self.watch}
+
     async def run(self) -> None:
+        if getattr(self, "fake", False):
+            self.connected.set()
+            await self.on_change("*")
+            return
         backoff = 1
         async with aiohttp.ClientSession() as session:
             while True:

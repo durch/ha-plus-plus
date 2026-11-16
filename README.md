@@ -12,6 +12,8 @@ cd house_knob
 set -a; . ../.envrc; set +a
 uv run python -m ha_knob.server --config knob.yaml --dry-run   # ws://<host>:8765/knob/ws
 open http://localhost:8765/sim/            # browser simulator of the round screen
+# No HA reachable (e.g. testing the physical knob away from the house):
+uv run python -m ha_knob.server --config knob.yaml --fake ../snapshots/<snapshot>.json
 uv run pytest -q
 ```
 

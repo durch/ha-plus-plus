@@ -190,19 +190,24 @@ def main() -> None:
     p.add_argument("--firmware-dir", default=None)
     p.add_argument("--state", default="state.json", help="where bridge-held targets persist")
     p.add_argument("-v", "--verbose", action="store_true")
+    p.add_argument("--fake", metavar="SNAPSHOT",
+                   help="no Home Assistant at all: start from a snapshot file, accept everything")
     p.add_argument("--dry-run", action="store_true",
                    help="read real HA state, but never change anything in HA")
     args = p.parse_args()
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s %(name)s %(levelname)s %(message)s")
     config = yaml.safe_load(Path(args.config).read_text())
-    ha_url = os.environ["HA_URL"]
-    token = os.environ["HA_TOKEN"]
+    ha_url = os.environ.get("HA_URL", "http://offline") if args.fake else os.environ["HA_URL"]
+    token = os.environ.get("HA_TOKEN", "") if args.fake else os.environ["HA_TOKEN"]
     layout = build(config)
     attach_store(layout, Path(args.state))
     bridge = Bridge(layout, ha_url, token,
                     Path(args.firmware_dir) if args.firmware_dir else None)
     bridge.ha.dry_run = args.dry_run
+    if args.fake:
+        bridge.ha.load_fake(json.loads(Path(args.fake).read_text()))
+        log.warning("FAKE: no Home Assistant; state from %s, every command succeeds locally", args.fake)
     if args.dry_run:
         log.warning("DRY RUN: knob input changes a local copy only, nothing is sent to HA")
     listen = config.get("listen", {})
