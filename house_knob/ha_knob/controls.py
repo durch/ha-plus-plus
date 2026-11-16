@@ -87,6 +87,7 @@ class ModeGroup:
     min: float
     max: float
     step: float
+    absolute: bool = False   # knob sets one target directly on every device (else: relative nudge)
 
 
 @dataclass
@@ -173,13 +174,14 @@ class ClimateControl(Control):
         temps = [float(t) for t in temps if isinstance(t, (int, float))]
         return sum(temps) / len(temps) if temps else None
 
-    def _cool_target(self, states: States) -> float:
-        """Cooling is absolute: one target the ACs are set to directly, in whole degrees."""
-        g = self.cool
-        if "cool_abs" in self.targets:
-            return _snap(self.targets["cool_abs"], g.min, g.max, g.step)
+    def _abs_target(self, states: States, mode: str) -> float:
+        """Absolute groups: one target the devices are set to directly."""
+        g = self._group(mode)
+        key = f"{mode}_abs"
+        if key in self.targets:
+            return _snap(self.targets[key], g.min, g.max, g.step)
         sp = self._setpoints(states, g)
-        base = sum(sp.values()) / len(sp) if sp else 24.0
+        base = sum(sp.values()) / len(sp) if sp else (24.0 if mode == "cool" else 21.0)
         return _snap(base, g.min, g.max, g.step)
 
     def shown_mode(self, states: States) -> str:
@@ -209,8 +211,8 @@ class ClimateControl(Control):
         if not warning and unavailable and len(unavailable) < len(group.members):
             warning = f"{len(unavailable)} unavailable"
         secondary = ""   # the knob's screen shows mode and nudge itself; no extra text
-        if mode == "cool":
-            target = self._cool_target(states)
+        if mode != "off" and group.absolute:
+            target = self._abs_target(states, mode)
             return {
                 "t": "state", "id": self.id, "kind": self.kind, "name": self.name, "icon": self.icon,
                 "available": len(unavailable) < len(group.members),
@@ -282,9 +284,9 @@ class ClimateControl(Control):
         if mode == "off":
             return
         group = self._group(mode)
-        if mode == "cool":   # absolute: every AC gets the same target
+        if group.absolute:   # every device gets the same target
             target = _snap(float(value), group.min, group.max, group.step)
-            self.targets["cool_abs"] = target
+            self.targets[f"{mode}_abs"] = target
             if self.store:
                 self.store()
             for m in group.members:
@@ -336,9 +338,9 @@ class ClimateControl(Control):
                 target = base + self._num(states, offset_helper, 0.0)
                 await call("climate", "set_temperature",
                            {"entity_id": m.entity, "temperature": target, "hvac_mode": m.hvac_mode})
-            elif mode == "cool":
+            elif self._group(mode).absolute:
                 await call("climate", "set_temperature",
-                           {"entity_id": m.entity, "temperature": self._cool_target(states),
+                           {"entity_id": m.entity, "temperature": self._abs_target(states, mode),
                             "hvac_mode": m.hvac_mode})
             elif states[m.entity].get("state") != m.hvac_mode:
                 await call("climate", "set_hvac_mode", {"entity_id": m.entity, "hvac_mode": m.hvac_mode})
@@ -529,7 +531,8 @@ def _members(raw: list, default_mode: str) -> list[Member]:
 
 def _group(raw: dict, mode: str) -> ModeGroup:
     return ModeGroup(mode, _members(raw["entities"], mode),
-                     float(raw["min"]), float(raw["max"]), float(raw["step"]))
+                     float(raw["min"]), float(raw["max"]), float(raw["step"]),
+                     bool(raw.get("absolute", mode == "cool")))   # cooling is always absolute
 
 
 @dataclass

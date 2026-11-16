@@ -212,3 +212,15 @@ async def test_save_default_adds_nudge_to_every_offset(layout):
     assert {c[2]["entity_id"]: c[2]["value"] for c in rec.calls} == {
         "input_number.offset_dnevni": 1.0, "input_number.offset_dnevni_2": 1.5, "input_number.offset_hodnik": 0.0}
     assert "heat" not in house.targets
+
+
+async def test_outdoors_heat_is_absolute(layout):
+    out = layout.controls["outdoors"]
+    out.targets.clear()
+    s = {"climate.wonderwall_art_smart_2": st("heat_cool", temperature=26.0, current_temperature=15.0),
+         "climate.heater": st("unavailable"), "climate.wonderwall_art_smart": st("unavailable")}
+    state = out.state(s)
+    assert state["mode"] == "heat" and state["value"] == 26 and state["primary"] == "26°" and state["min"] == 10
+    rec = Rec()
+    await out.adjust(s, 22, rec)
+    assert rec.calls == [("climate", "set_temperature", {"entity_id": "climate.wonderwall_art_smart_2", "temperature": 22.0})]
