@@ -64,7 +64,9 @@ async def test_switch_to_cool_skips_unavailable(layout):
     rec = Rec()
     await house.set_mode(states, "cool", rec)
     assert rec.calls[0][2] == {"entity_id": ["climate.dnevni"], "hvac_mode": "off"}
-    assert {c[2]["entity_id"] for c in rec.calls[1:] if c[0] == "climate"} == {"climate.9424b844f92c", "climate.9424b82c5fa0"}
+    cool = [c for c in rec.calls[1:] if c[0] == "climate"]
+    assert {c[2]["entity_id"] for c in cool} == {"climate.9424b844f92c", "climate.9424b82c5fa0"}
+    assert all(c[1] == "set_temperature" and c[2]["hvac_mode"] == "cool" for c in cool)
 
 
 async def test_lockstep_adjust_keeps_relative_offsets(layout):
@@ -81,16 +83,20 @@ async def test_lockstep_adjust_keeps_relative_offsets(layout):
         "climate.dnevni": 27.5, "climate.dnevni_2": 25.0, "climate.hodnik": 21.0}
 
 
-async def test_lockstep_half_steps_accumulate_on_whole_degree_acs(layout):
+async def test_cool_is_absolute_whole_degrees(layout):
     house = layout.controls["indoors"]
+    house.targets.clear()
     states = house_states(**{
         "climate.9424b844f92c": st("cool", temperature=24, current_temperature=25, target_temp_step=1),
         "climate.9424b82c5fa0": st("cool", temperature=26, current_temperature=25, target_temp_step=1),
     })
+    out = house.state(states)
+    assert out["mode"] == "cool" and out["value"] == 25 and out["primary"] == "25°" and out["min"] == 18
     rec = Rec()
-    await house.adjust(states, house.state(states)["value"] - 1, rec)
+    await house.adjust(states, 23.4, rec)
     assert {c[2]["entity_id"]: c[2]["temperature"] for c in rec.calls} == {
-        "climate.9424b844f92c": 23.0, "climate.9424b82c5fa0": 25.0}
+        "climate.9424b844f92c": 23.0, "climate.9424b82c5fa0": 23.0}
+    assert house.state(states)["value"] == 23
 
 
 def test_window_warning_only_while_heating(layout):

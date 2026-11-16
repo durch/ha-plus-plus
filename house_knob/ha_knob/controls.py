@@ -173,6 +173,15 @@ class ClimateControl(Control):
         temps = [float(t) for t in temps if isinstance(t, (int, float))]
         return sum(temps) / len(temps) if temps else None
 
+    def _cool_target(self, states: States) -> float:
+        """Cooling is absolute: one target the ACs are set to directly, in whole degrees."""
+        g = self.cool
+        if "cool_abs" in self.targets:
+            return _snap(self.targets["cool_abs"], g.min, g.max, g.step)
+        sp = self._setpoints(states, g)
+        base = sum(sp.values()) / len(sp) if sp else 24.0
+        return _snap(base, g.min, g.max, g.step)
+
     def shown_mode(self, states: States) -> str:
         """Mode to display: a just-tapped mode wins until the devices catch up."""
         actual = self.current_mode(states)
@@ -205,6 +214,18 @@ class ClimateControl(Control):
             secondary = ""
         else:
             secondary = f"{'Warmer' if offset > 0 else 'Cooler'} {offset:+.1f}°"
+        if mode == "cool":
+            target = self._cool_target(states)
+            return {
+                "t": "state", "id": self.id, "kind": self.kind, "name": self.name, "icon": self.icon,
+                "available": len(unavailable) < len(group.members),
+                "on": True, "mode": mode, "modes": ["off", "heat", "cool"],
+                "value": target, "min": group.min, "max": group.max, "step": group.step,
+                "unit": "°C", "adjustable": True,
+                "primary": f"{target:.0f}°",
+                "secondary": f"Now {_fmt_temp(now)}" if now is not None else "",
+                "warning": warning, "actions": [],
+            }
         return {
             "t": "state", "id": self.id, "kind": self.kind, "name": self.name, "icon": self.icon,
             "available": len(unavailable) < len(group.members),
@@ -266,6 +287,15 @@ class ClimateControl(Control):
         if mode == "off":
             return
         group = self._group(mode)
+        if mode == "cool":   # absolute: every AC gets the same target
+            target = _snap(float(value), group.min, group.max, group.step)
+            self.targets["cool_abs"] = target
+            if self.store:
+                self.store()
+            for m in group.members:
+                if _avail(states, m.entity) and _attr(states, m.entity, "temperature") != target:
+                    await call("climate", "set_temperature", {"entity_id": m.entity, "temperature": target})
+            return
         new = _snap(float(value), -OFFSET_RANGE, OFFSET_RANGE, group.step)
         delta = new - self.targets.get(mode, 0.0)
         self.targets[mode] = new
@@ -311,6 +341,10 @@ class ClimateControl(Control):
                 target = base + self._num(states, offset_helper, 0.0)
                 await call("climate", "set_temperature",
                            {"entity_id": m.entity, "temperature": target, "hvac_mode": m.hvac_mode})
+            elif mode == "cool":
+                await call("climate", "set_temperature",
+                           {"entity_id": m.entity, "temperature": self._cool_target(states),
+                            "hvac_mode": m.hvac_mode})
             elif states[m.entity].get("state") != m.hvac_mode:
                 await call("climate", "set_hvac_mode", {"entity_id": m.entity, "hvac_mode": m.hvac_mode})
         if mode == "heat" and self.schedule:
