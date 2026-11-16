@@ -1,0 +1,445 @@
+<!doctype html>
+<!--
+  CONCEPT: Touch and turn  (slug: touch-and-turn)
+
+  THE IDEA
+    The screen is the house, not a menu: eight fixed zones on the rim, one per thing, and whichever
+    zone your finger is on is the thing the knob turns. There is nothing to select and no screen to leave.
+
+  LAYOUT (static, hit-tested by radius + angle only)
+    Rim, r 92..180 px: 8 wedges of 45 deg, one thing each, placed by kind so the map can be learned by feel:
+        top three    = covers   (Windows, Blinds, Shutters)  - things overhead; they need no readout,
+                                                               which is fine because a finger here hides the hub
+        left / right = climate  (Indoors left, Outdoors right)
+        bottom three = lights   (Terasa, Ambiance, Reflektor) - the most-turned things sit where a hand
+                                                               coming from below covers nothing
+    Hub, r < 92 px: the readout for the thing in hand, and the only second layer in the design.
+        Its left / right halves pick that thing's "flavour": light = previous / next scene,
+        climate = Heat (left) / Cool (right). For Indoors, the lower band (y >= 200) becomes "Save"
+        while there is a nudge to save. With nothing in hand the hub is inert: the one safe place to touch.
+
+  TURN
+    Finger resting on a wedge + turn  -> adjusts that thing: light brightness (5 % detents, faster when
+                                         spun; down to 0 = off, up from off = on), climate nudge
+                                         (0.5 / 1 deg), cover: clockwise = up / open, counter = down / closed.
+    Finger resting on the hub + turn  -> steps the flavour of the thing in hand (scenes; Heat <-> Cool).
+                                         The name is drawn at the top of the glass, clear of the finger.
+    No finger down                    -> adjusts the thing you touched last, for 8 s after the last touch
+                                         or detent (the hub shows it the whole time). After that a bare
+                                         turn changes NOTHING; it only lights the zones as a prompt.
+       Why: the latch is what makes the device usable with one hand (tap the lamp, then turn). Why not a
+       permanent default: a detented ring on a table gets bumped, and a knob whose target you cannot see
+       is exactly the mode error this concept exists to remove. "If the centre shows a thing, the knob
+       moves that thing; if it shows the room temperature, the knob is asleep."
+
+  TAP (finger down < 400 ms, lifted inside the same zone, no turn)
+    Wedge: flip it. Light on/off; cover open/closed (up/down); climate Off <-> the mode it was last in.
+    Hub:   left / right half = flavour as above; lower band = Save (Indoors, heating, nudge != 0).
+    Resting >= 400 ms never flips anything: it only takes the thing in hand. So "rest to peek" is safe.
+    The chord stays bound to the zone the finger landed in; drifting off it cancels the tap, not the hold.
+
+  VALUE ADJUSTMENT
+    Always the same motion: the thing is under (or was just under) your finger, the ring changes its one
+    number, the hub shows it in 48 px digits with an arc gauge, and each wedge fills from the hub outward
+    with its own level so the whole house reads at a glance.
+
+  PROS
+    + Zero navigation: every one of the 8 things is one touch away, always in the same place.
+    + The common acts are one gesture each: tap = flip, touch-and-turn = set. Works by position, in the dark.
+    + The knob can never act on something you are not touching or have not just touched.
+    + All 8 states (on/off, level, heat/cool) are visible at once; a menu shows one.
+
+  CONS / WHERE THE IDEA STRAINS (honest)
+    - One hand cannot hold a finger on the glass and turn the ring around it comfortably. The 8 s latch
+      fixes that, but a latch is a timed mode: the "no modes" claim is only strictly true two-handed.
+    - Every wedge is live. A stray touch flips a light, or starts the shutters. A menu puts a step in
+      front of that; this has none (only "act on release inside the zone" and "resting does not act").
+    - 8 wedges on 46 mm is the limit: each is 88 px deep and only 70 px wide at its inner edge. There is no
+      room for the firmware's 22 px Lato inside a wedge, so zones are an icon plus a 17 px curved label
+      (new font size or 8 pre-rendered bitmaps). Without the labels it is a memory test of 8 positions.
+    - Fingers hide things: a finger on the hub hides the hub (hence the flavour name moving to the top),
+      and reaching a top wedge from below covers the hub (hence covers on top).
+    - Hold-and-turn is undiscoverable; it has to be taught once. Scenes are still "a second place" (the hub).
+    - Worse than a plain menu at: reading (no full-screen page per thing, most text is small), protecting
+      against accidents, and "just turn it" (an idle knob does nothing until you touch the glass).
+    - Needs the firmware to report "finger down at (x, y)" concurrently with encoder ticks, and palm /
+      sleeve rejection matters more than in a menu.
+    - Glyphs: the big readout uses Montserrat 48 with digits plus + - . deg %, words fall back to Noto Sans 28.
+
+  PORTING NOTE
+    hit() below is the whole touch map: two radius compares, one y compare, one angle bucket
+    (the atan2 can be replaced by three slope compares against tan 22.5 / tan 67.5).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Touch and turn</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,1,0">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700&family=Montserrat:wght@400;500&family=Noto+Sans:wght@400;500&display=swap">
+<style>
+  :root {
+    --page:#17171a; --ink:#f2f0ec; --dim:#9c9ca6; --faint:#6c6c76;
+    --glass:#000; --zone:#131316; --zone-hi:#1f1f24; --track:#2a2a30;
+    --heat:#ff8552; --cool:#58c4f6; --light:#ffcb5c; --cover:#a8d672; --warn:#ffb300; --ok:#9bd36a; --live:#ff7043;
+  }
+  * { box-sizing:border-box; }
+  ::selection { background:#ffcb5c; color:#17171a; }
+  body { margin:0; min-height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center;
+         gap:22px; padding:40px 16px; background:var(--page); color:var(--ink); font-family:'Lato',system-ui,sans-serif; }
+
+  /* The ring around the glass is the encoder. */
+  .ring { width:420px; height:420px; border-radius:50%; display:grid; place-items:center; flex:none; position:relative;
+          box-shadow:0 18px 40px -12px rgba(0,0,0,.7); }
+  .ring::before { content:''; position:absolute; inset:0; border-radius:50%; transform:rotate(var(--a, 0deg));
+          background:repeating-conic-gradient(#3a3a40 0 1.2deg, #2b2b30 1.2deg 3deg);
+          box-shadow:inset 0 0 0 1px #4a4a52; transition:transform .12s cubic-bezier(.2,.8,.2,1); }
+  #knob { width:360px; height:360px; border-radius:50%; background:var(--glass); position:relative; z-index:1; overflow:hidden;
+          box-shadow:0 0 0 5px #0c0c0e; user-select:none; -webkit-user-select:none; touch-action:none; cursor:pointer; outline:none; }
+  #knob:focus-visible { box-shadow:0 0 0 5px #0c0c0e, 0 0 0 7px var(--light); }
+  svg { position:absolute; inset:0; width:360px; height:360px; display:block; }
+
+  /* Rim wedges */
+  .base { fill:var(--zone); stroke:transparent; stroke-width:2; transition:fill .18s, stroke .18s; }
+  .lvl  { fill:var(--hue); opacity:.26; transition:opacity .18s, d .16s cubic-bezier(.2,.8,.2,1); }
+  .ico  { font-family:'Material Symbols Rounded'; font-size:32px; fill:var(--faint); text-anchor:middle; dominant-baseline:central; transition:fill .18s; }
+  .lab  { font-family:'Lato',sans-serif; font-size:17px; letter-spacing:.02em; fill:var(--faint); text-anchor:middle; transition:fill .18s; }
+  .w.on .ico { fill:var(--hue); } .w.on .lab { fill:var(--dim); }
+  .w.latched .base { stroke:var(--hue); stroke-opacity:.55; fill:var(--zone-hi); }
+  .w.held .base { stroke:var(--hue); fill:var(--zone-hi); }
+  .w.held .lvl, .w.latched .lvl { opacity:.42; }
+  .w.held .ico, .w.latched .ico { fill:var(--hue); } .w.held .lab, .w.latched .lab { fill:var(--ink); }
+  .w.gone .ico, .w.gone .lab { fill:#3c3c44; }
+  #rim { transition:opacity .2s; } #rim.away { opacity:.16; }
+  #rim.hint .base { animation:hint 1.5s cubic-bezier(.2,.8,.2,1); }
+  @keyframes hint { 0%,100% { fill:var(--zone); } 25% { fill:#34343c; } }
+  @media (prefers-reduced-motion:reduce) { #rim.hint .base { animation:none; fill:var(--zone-hi); } .lvl, .ring::before { transition:none; } }
+
+  /* Hub + overlay text */
+  text { pointer-events:none; }
+  .t-name { font-family:'Lato',sans-serif; font-size:16px; fill:var(--dim); text-anchor:middle; }
+  .t-big  { font-family:'Montserrat',sans-serif; font-weight:500; font-size:46px; fill:var(--ink); text-anchor:middle; font-variant-numeric:tabular-nums; }
+  .t-word { font-family:'Noto Sans',sans-serif; font-size:28px; fill:var(--ink); text-anchor:middle; }
+  .t-opt  { font-family:'Noto Sans',sans-serif; font-size:19px; fill:var(--faint); text-anchor:middle; }
+  .t-opt.on { fill:var(--hue); font-weight:500; }
+  .t-sub  { font-family:'Lato',sans-serif; font-size:16px; fill:var(--dim); text-anchor:middle; }
+  .t-save { font-family:'Noto Sans',sans-serif; font-size:20px; fill:var(--warn); text-anchor:middle; }
+  .t-over { font-family:'Noto Sans',sans-serif; font-size:24px; fill:var(--ink); text-anchor:middle; }
+  .warn { fill:var(--warn); }
+  .chev { fill:none; stroke:var(--dim); stroke-width:2.5; stroke-linecap:round; stroke-linejoin:round; }
+
+  /* Page furniture */
+  .status { display:flex; gap:10px; align-items:center; font-size:14px; min-height:28px; flex-wrap:wrap; justify-content:center; }
+  #mode { font-weight:700; letter-spacing:.06em; font-size:12px; padding:5px 10px; border-radius:99px; border:1px solid currentColor; color:var(--dim); }
+  #bind { color:var(--dim); }
+  #bind b { color:var(--ink); font-weight:700; }
+  .help { margin:0; max-width:62ch; font-size:15px; line-height:1.6; color:#b9b9c2; text-wrap:pretty; }
+  .help b { color:var(--ink); }
+  kbd { font:inherit; font-size:13px; background:#2a2a30; border-radius:4px; padding:1px 6px; color:var(--ink); }
+</style>
+</head>
+<body>
+<div class="ring" id="ring"><div id="knob" tabindex="0" aria-label="House knob simulator"><svg id="scr" viewBox="0 0 360 360"></svg></div></div>
+<div class="status"><span id="mode">CONNECTING</span><span id="bind"></span></div>
+<p class="help">
+  <b>Hold and turn:</b> press and hold the mouse on a zone and scroll the <kbd>wheel</kbd> (or <kbd>↑</kbd> <kbd>↓</kbd>) to set it: brightness, a warmer / cooler nudge, a cover up or down.
+  <b>Tap</b> a zone to flip it on or off.
+  After any touch the knob stays on that thing for 8 seconds, so you can also tap, let go, then turn.
+  While a thing is in the centre, tap the centre's <b>left / right half</b> for the previous / next light scene or for Heat / Cool (or hold the centre and turn); <b>Save</b> appears at its bottom when Indoors has a nudge worth keeping.
+  With the room temperature in the centre the knob is asleep: turning it changes nothing.
+</p>
+<script>
+/* ───────── geometry (the part that ports to C) ───────── */
+const CX = 180, R_HUB = 92, R_OUT = 180, SAVE_Y = 200;
+const REST_MS = 400;      // finger down this long = "resting", not a tap
+const LATCH_MS = 8000;    // bare turns keep driving the last-touched thing this long
+
+// (x, y) in screen px, origin top-left. Returns the static zone; meaning is decided by what is in hand.
+function hit(x, y) {
+  const dx = x - CX, dy = y - CX, r2 = dx * dx + dy * dy;
+  if (r2 > R_OUT * R_OUT) return null;                       // corners do not exist
+  if (r2 < R_HUB * R_HUB) return { k:'hub', low: y >= SAVE_Y, left: dx < 0 };
+  const a = (Math.atan2(dx, -dy) * 180 / Math.PI + 360 + 22.5) % 360;   // 0 = 12 o'clock, clockwise
+  return { k:'thing', slot: Math.floor(a / 45) % 8 };
+}
+const sameZone = (a, b) => !!a && !!b && a.k === b.k && (a.k === 'thing' ? a.slot === b.slot : a.low === b.low && a.left === b.left);
+
+// Slots are numbered clockwise from 12 o'clock. Placement by kind: covers on top, climate at the sides, lights below.
+const SLOTS = { cover:[7, 0, 1], climate:[6, 2], light:[5, 4, 3] };
+
+/* ───────── state ───────── */
+const ICON = { indoors:'home', outdoors:'deck', 'light.terasa':'light', 'light.ambiance':'auto_awesome', 'light.reflektor':'highlight',
+               windows:'window', blinds:'blinds', shutters:'roller_shades' };
+const S = { conn:false, order:[], states:{}, slotId:Array(8).fill(null), latched:null, latchUntil:0, touch:null,
+            local:{}, lastTurn:{}, lastOn:{}, scene:{}, sceneAt:{}, ack:null, hintUntil:0, lastDetent:0 };
+let ws, seq = 0, restTimer = 0, ackTimer = 0;
+const now = () => Date.now();
+
+function connect() {
+  const host = location.protocol === 'file:' || !location.host ? 'localhost:8765' : location.host;   // opened from disk: use the local bridge
+  ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${host}/knob/ws?knob_id=touch-and-turn&fw=sim`);
+  ws.onopen = () => { S.conn = true; render(); };
+  ws.onclose = () => { S.conn = false; setMode(null); render(); setTimeout(connect, 1500); };
+  ws.onmessage = ev => {
+    const m = JSON.parse(ev.data);
+    if (m.t === 'hello') setMode(m.dry_run);
+    else if (m.t === 'layout') { S.order = m.sections.flatMap(s => s.controls); }
+    else if (m.t === 'state') { S.states[m.id] = m; if (m.kind === 'climate' && m.mode && m.mode !== 'off') S.lastOn[m.id] = m.mode; }
+    else if (m.t === 'ack' && (!m.ok || m.message)) flash(m.message || 'Failed');
+    render();
+  };
+}
+function setMode(dry) {
+  const d = document.getElementById('mode');
+  d.textContent = dry == null ? 'CONNECTING' : dry ? 'DRY RUN · nothing is sent to the house' : 'LIVE · this changes the house';
+  d.style.color = dry == null ? 'var(--dim)' : dry ? 'var(--ok)' : 'var(--live)';
+}
+const send = m => ws && ws.readyState === 1 && ws.send(JSON.stringify({ ...m, seq: ++seq }));
+function flash(msg) { S.ack = msg; clearTimeout(ackTimer); ackTimer = setTimeout(() => { S.ack = null; render(); }, 2400); }
+
+function assignSlots() {
+  const by = { cover:[], climate:[], light:[] };
+  for (const id of S.order) { const k = S.states[id]?.kind; if (by[k]) by[k].push(id); }
+  S.slotId.fill(null);
+  if (by.cover.length === 3 && by.climate.length === 2 && by.light.length === 3)
+    for (const k in SLOTS) SLOTS[k].forEach((slot, i) => S.slotId[slot] = by[k][i]);
+  else S.order.slice(0, 8).forEach((id, i) => S.slotId[i] = id);   // unknown house: just go round
+}
+
+const value = st => (now() - (S.lastTurn[st.id] || 0) < 1500 && S.local[st.id] != null) ? S.local[st.id] : st.value;
+const turning = st => now() - (S.lastTurn[st.id] || 0) < 1500;
+const hue = st => !st ? 'var(--faint)' : st.kind === 'light' ? 'var(--light)' : st.kind === 'cover' ? 'var(--cover)'
+                 : (st.mode === 'cool' || (st.mode === 'off' && S.lastOn[st.id] === 'cool')) ? 'var(--cool)' : 'var(--heat)';
+const canSave = st => st.kind === 'climate' && st.mode === 'heat' && (st.actions || []).includes('save_default') && Math.abs(value(st)) > 0.01;
+const flavours = st => st.kind === 'climate' ? ['heat', 'cool'] : st.kind === 'light' ? (st.modes || []) : [];
+const curFlavour = st => st.kind === 'climate' ? st.mode : (st.mode || S.scene[st.id] || '');
+const shownScene = st => st.mode || (now() - (S.sceneAt[st.id] || 0) < 2500 ? S.scene[st.id] : '');
+
+// The thing "in hand": under the finger, else the latched one. This is what the hub shows and the knob drives.
+function latch(id) { S.latched = id; S.latchUntil = now() + LATCH_MS; }
+function inHand() {
+  if (S.touch?.id) return S.states[S.touch.id] || null;
+  return S.latched && (S.touch || now() < S.latchUntil) ? S.states[S.latched] || null : null;
+}
+setInterval(() => {
+  if (S.touch && S.latched) S.latchUntil = now() + LATCH_MS;          // a finger on the glass keeps it alive
+  else if (S.latched && now() >= S.latchUntil) { S.latched = null; render(); }
+}, 250);
+
+/* ───────── knob ───────── */
+function turn(dir) {
+  const t = S.touch, fast = now() - S.lastDetent < 70; S.lastDetent = now();
+  const ring = document.getElementById('ring'); ring.style.setProperty('--a', (ring._a = (ring._a || 0) + dir * 3) + 'deg');   // only the ring turns, never the glass
+  if (t) t.turned = true;
+  if (t?.id) { latch(t.id); adjust(S.states[t.id], dir, fast); }
+  else if (t && t.z.k === 'hub') { const st = inHand(); if (st) { latch(st.id); stepFlavour(st, dir, false); } }
+  else { const st = inHand(); if (st) { latch(st.id); adjust(st, dir, fast); } else S.hintUntil = now() + 1600, setTimeout(render, 1650); }
+  render();
+}
+
+function adjust(st, dir, fast) {
+  if (!st || !st.available) return flash('Unavailable');
+  let v;
+  if (st.kind === 'cover') { v = dir > 0 ? 100 : 0; if (S.local[st.id] === v && turning(st)) return void (S.lastTurn[st.id] = now()); }
+  else {
+    if (!st.adjustable) return flash(st.kind === 'climate' ? `Off · tap ${st.name} first` : 'Not dimmable');
+    const step = st.step * (fast && st.kind === 'light' ? 2 : 1);
+    v = Math.min(st.max, Math.max(st.min, Math.round((value(st) + dir * step) / st.step) * st.step));
+  }
+  S.local[st.id] = v; S.lastTurn[st.id] = now(); setTimeout(render, 1600);
+  send({ t:'adjust', id:st.id, value:v });
+}
+
+function stepFlavour(st, dir, wrap) {
+  const list = flavours(st), n = list.length; if (!n || !st.available) return;
+  let i = list.indexOf(curFlavour(st));
+  if (st.kind === 'climate') i = dir > 0 ? 1 : 0;                              // counter = Heat, clockwise = Cool
+  else if (i < 0) i = dir > 0 ? 0 : n - 1;
+  else i = wrap ? (i + dir + n) % n : Math.min(n - 1, Math.max(0, i + dir));   // the dial has ends, taps go round
+  setFlavour(st, list[i]);
+}
+function setFlavour(st, mode) {
+  if (st.kind === 'climate') { if (st.mode === mode) return; S.lastOn[st.id] = mode; }
+  else { if (curFlavour(st) === mode && shownScene(st) === mode) return; S.scene[st.id] = mode; S.sceneAt[st.id] = now(); setTimeout(render, 2600); }
+  send({ t:'mode', id:st.id, mode });
+}
+
+/* ───────── touch ───────── */
+function down(x, y) {
+  const z = hit(x, y); if (!z) return;
+  const t = S.touch = { z, id: z.k === 'thing' ? S.slotId[z.slot] : null, turned:false, rested:false, left:false };
+  clearTimeout(restTimer);
+  restTimer = setTimeout(() => { if (S.touch === t) { t.rested = true; if (t.id) latch(t.id); render(); } }, REST_MS);
+  render();
+}
+function move(x, y) { const t = S.touch; if (t && !t.left && !sameZone(hit(x, y), t.z)) { t.left = true; } }
+function up(x, y) {
+  const t = S.touch; if (!t) return;
+  clearTimeout(restTimer); S.touch = null;
+  const tap = !t.turned && !t.rested && !t.left;
+  if (t.id) { latch(t.id); if (tap) tapThing(S.states[t.id]); }
+  else if (t.z.k === 'hub') { const st = inHand(); if (st) { latch(st.id); if (tap) tapHub(st, t.z); } }
+  render();
+}
+function tapThing(st) {
+  if (!st) return;
+  if (!st.available) return flash('Unavailable');
+  if (st.kind === 'light') send({ t:'toggle', id:st.id });
+  else if (st.kind === 'cover') send({ t:'adjust', id:st.id, value: st.on ? 0 : 100 });
+  else send({ t:'mode', id:st.id, mode: st.mode === 'off' ? (S.lastOn[st.id] || 'heat') : 'off' });
+}
+function tapHub(st, z) {
+  if (!st.available) return flash('Unavailable');
+  if (st.kind === 'climate') {
+    if (z.low && canSave(st)) return void send({ t:'action', id:st.id, name:'save_default' });
+    setFlavour(st, z.left ? 'heat' : 'cool');
+  } else if (st.kind === 'light') stepFlavour(st, z.left ? -1 : 1, true);
+}
+
+/* ───────── input wiring (mouse = finger, wheel / arrows = ring) ───────── */
+const el = document.getElementById('knob'), scr = document.getElementById('scr');
+const xy = e => { const b = el.getBoundingClientRect(); return [(e.clientX - b.left) * 360 / b.width, (e.clientY - b.top) * 360 / b.height]; };
+el.addEventListener('pointerdown', e => { if (e.button) return; el.setPointerCapture(e.pointerId); el.focus(); down(...xy(e)); });
+el.addEventListener('pointermove', e => { if (S.touch) move(...xy(e)); });
+el.addEventListener('pointerup', e => up(...xy(e)));
+el.addEventListener('pointercancel', () => { clearTimeout(restTimer); S.touch = null; render(); });
+el.addEventListener('contextmenu', e => e.preventDefault());
+let wheelAcc = 0, wheelAt = 0;
+el.addEventListener('wheel', e => {
+  e.preventDefault();
+  if (now() - wheelAt > 250) wheelAcc = 0; wheelAt = now();
+  wheelAcc += e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
+  for (let n = 0; Math.abs(wheelAcc) >= 40 && n < 3; n++) { const d = Math.sign(wheelAcc); wheelAcc -= d * 40; turn(d); }
+  if (Math.abs(wheelAcc) >= 40) wheelAcc = 0;
+}, { passive:false });
+document.addEventListener('keydown', e => { if (e.key === 'ArrowUp') turn(1); else if (e.key === 'ArrowDown') turn(-1); else return; e.preventDefault(); });
+
+/* ───────── drawing ───────── */
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
+const pt = (r, a) => { const t = a * Math.PI / 180; return [(CX + r * Math.sin(t)).toFixed(2), (CX - r * Math.cos(t)).toFixed(2)]; };
+const arc = (r, a0, a1) => `M${pt(r, a0)} A${r},${r} 0 ${Math.abs(a1 - a0) > 180 ? 1 : 0} ${a1 > a0 ? 1 : 0} ${pt(r, a1)}`;
+const sector = (r0, r1, a0, a1) => `M${pt(r1, a0)} A${r1},${r1} 0 0 1 ${pt(r1, a1)} L${pt(r0, a1)} A${r0},${r0} 0 0 0 ${pt(r0, a0)} Z`;
+const W_IN = 97, W_OUT = 178, GAP = 1.3;
+
+function build() {
+  let h = '<defs>';
+  for (let s = 0; s < 8; s++) {
+    const a = s * 45, under = s >= 3 && s <= 5;          // bottom labels run the other way so they read upright
+    h += `<path id="lp${s}" d="${under ? arc(167, a + 22, a - 22) : arc(154, a - 22, a + 22)}"/>`;
+  }
+  h += '</defs><g id="rim">';
+  for (let s = 0; s < 8; s++) {
+    const a = s * 45, [ix, iy] = pt(124, a);
+    h += `<g class="w" id="w${s}"><path class="base" d="${sector(W_IN, W_OUT, a - 22.5 + GAP, a + 22.5 - GAP)}"/><path class="lvl" id="lv${s}"/>
+          <text class="ico" id="ic${s}" x="${ix}" y="${iy}"></text>
+          <text class="lab"><textPath id="lb${s}" href="#lp${s}" startOffset="50%"></textPath></text></g>`;
+  }
+  h += '</g><g id="hub"></g><g id="over"></g>';
+  scr.innerHTML = h;
+}
+
+function level(st) {      // 0..1: how full the wedge is
+  if (!st || !st.available) return 0;
+  if (st.kind === 'light') { const v = turning(st) ? value(st) : (st.on ? st.value : 0); return v > 0 ? Math.max(.14, v / 100) : 0; }
+  if (st.kind === 'cover') return (turning(st) ? value(st) : st.on ? 100 : 0) / 100;
+  return st.mode === 'off' ? 0 : 1;
+}
+
+const T = (cls, x, y, s, extra = '') => `<text class="${cls}" x="${x}" y="${y}" ${extra}>${esc(s)}</text>`;
+const pips = (n, i, y, c) => { let h = ''; for (let k = 0; k < n; k++) h += `<circle cx="${CX + (k - (n - 1) / 2) * 15}" cy="${y}" r="${k === i ? 4 : 2.5}" fill="${k === i ? c : 'var(--track)'}"/>`; return h; };
+const fit = (s, max, w) => s.length > max ? `textLength="${w}" lengthAdjust="spacingAndGlyphs"` : '';
+
+function hubIdle() {
+  if (now() < S.hintUntil) return T('t-sub', CX, 170, 'Rest a finger on a zone,') + T('t-sub', CX, 194, 'then turn');
+  const cl = S.order.map(id => S.states[id]).filter(s => s?.kind === 'climate');
+  if (!cl.length) return '';
+  let h = T('t-name', CX, 124, cl[0].name) + T('t-big', CX, 182, cl[0].primary ?? '–');
+  if (cl[1]) h += T('t-sub', CX, 216, `${cl[1].name} ${cl[1].primary ?? '–'}`);
+  return h + (S.ack ? T('t-sub warn', CX, 244, S.ack, fit(S.ack, 16, 120)) : '');
+}
+
+function hubFor(st) {
+  const c = hue(st), v = value(st), tn = turning(st);
+  const top = S.ack ?? st.warning;
+  let h = `<g style="--hue:${c}">` + T('t-name' + (top ? ' warn' : ''), CX, 118, top ?? st.name, fit(String(top ?? st.name), 15, 118));
+  if (!st.available) return h + T('t-word', CX, 180, 'Unavailable', 'textLength="150" lengthAdjust="spacingAndGlyphs"') + '</g>';
+
+  if (st.kind === 'light') {
+    const on = tn ? v > 0 : st.on;
+    h += on && st.adjustable ? T('t-big', CX, 172, Math.round(tn ? v : st.value) + '%') : T('t-word', CX, 168, on ? 'On' : 'Off');
+    if (st.adjustable) h += `<path d="${arc(88, 225, 495)}" stroke="var(--track)" stroke-width="3" fill="none" stroke-linecap="round"/>`
+      + (on ? `<path d="${arc(88, 225, 225 + 270 * Math.max(.01, (tn ? v : st.value) / 100))}" stroke="${c}" stroke-width="3" fill="none" stroke-linecap="round"/>` : '');
+    const list = flavours(st);
+    if (list.length) {
+      const sc = shownScene(st), i = list.indexOf(sc);
+      h += T('t-opt' + (sc ? ' on' : ''), CX, 204, sc || 'Scenes', fit(sc || '', 12, 108))
+         + `<path class="chev" d="M116,191 l-7,7 l7,7"/><path class="chev" d="M244,191 l7,7 l-7,7"/>` + pips(list.length, i, 230, c);
+    } else h += T('t-sub', CX, 204, st.secondary ?? '');
+  }
+  else if (st.kind === 'climate') {
+    const save = canSave(st), off = st.mode === 'off';
+    h += T('t-big', CX, 166, tn ? (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v).toFixed(st.step < 1 ? 1 : 0) + '°' : (st.primary ?? '–'));
+    if (!off) { const a = v / (st.max || 5) * 120;
+      h += `<path d="${arc(88, -120, 120)}" stroke="var(--track)" stroke-width="3" fill="none" stroke-linecap="round"/>`
+         + (Math.abs(a) > 1 ? `<path d="${a > 0 ? arc(88, 0, a) : arc(88, a, 0)}" stroke="${c}" stroke-width="3" fill="none" stroke-linecap="round"/>` : '')
+         + `<circle cx="${pt(88, a)[0]}" cy="${pt(88, a)[1]}" r="4.5" fill="${c}"/>`; }
+    h += `<text class="t-opt ${st.mode === 'heat' ? 'on' : ''}" x="136" y="193" style="--hue:var(--heat)">Heat</text>`
+       + `<text class="t-opt ${st.mode === 'cool' ? 'on' : ''}" x="224" y="193" style="--hue:var(--cool)">Cool</text>`
+       + `<path d="M180,177 v20" stroke="var(--track)" stroke-width="1.5"/>`;
+    if (save) h += `<path d="M96,${SAVE_Y + 6} H264" stroke="var(--track)" stroke-width="1.5"/>` + T('t-save', CX, 240, `Save ${v > 0 ? '+' : '−'}${Math.abs(v).toFixed(1)}°`);
+    else h += T('t-sub', CX, 232, st.secondary ?? '');
+  }
+  else {
+    const word = tn ? (v > 0 ? 'Opening' : 'Closing') : (st.primary ?? (st.on ? 'Open' : 'Closed'));
+    h += T('t-word', CX, 176, word, fit(word, 9, 140)) + T('t-sub', CX, 206, st.secondary ?? '')
+       + `<path class="chev" d="M168,236 l12,-9 l12,9" style="stroke:${st.on ? c : 'var(--faint)'}"/><path class="chev" d="M168,246 l12,9 l12,-9" style="stroke:${st.on ? 'var(--faint)' : c}"/>`;
+  }
+  return h + '</g>';
+}
+
+// Finger on the hub hides the hub, so the flavour being dialled is written across the top of the glass.
+function overlay(st) {
+  const t = S.touch;
+  if (!t || t.z.k !== 'hub' || !(t.rested || t.turned) || !st) return '';
+  const list = flavours(st); if (!list.length) return '';
+  const cur = st.kind === 'climate' ? st.mode : shownScene(st), i = list.indexOf(cur);
+  const name = st.kind === 'climate' ? (cur === 'off' ? 'Off' : cur[0].toUpperCase() + cur.slice(1)) : (cur || 'Turn for scenes');
+  const c = st.kind === 'climate' && cur !== 'off' ? `var(--${cur})` : hue(st);
+  return pips(list.length, i, 34, c) + T('t-over', CX, 72, name, fit(name, 15, 200)) + T('t-sub', CX, 94, st.name);
+}
+
+function render() {
+  if (!scr.firstChild) build();
+  const hub = document.getElementById('hub'), over = document.getElementById('over'), rim = document.getElementById('rim');
+  if (!S.conn || !S.order.length) {
+    hub.innerHTML = T('t-sub', CX, 176, 'Connecting to') + T('t-sub', CX, 198, 'the bridge…'); over.innerHTML = '';
+    document.getElementById('bind').textContent = ''; return;
+  }
+  assignSlots();
+  const st = inHand(), heldId = S.touch?.id, ov = overlay(st);
+  rim.setAttribute('class', (ov ? 'away ' : '') + (now() < S.hintUntil ? 'hint' : ''));
+  for (let s = 0; s < 8; s++) {
+    const id = S.slotId[s], t = id && S.states[id], g = document.getElementById('w' + s), a = s * 45, lv = level(t);
+    g.style.setProperty('--hue', hue(t));
+    g.setAttribute('class', 'w' + (lv > 0 ? ' on' : '') + (t && !t.available ? ' gone' : '') + (id && id === heldId ? ' held' : id && st && id === st.id ? ' latched' : ''));
+    document.getElementById('lv' + s).setAttribute('d', sector(W_IN, W_IN + (W_OUT - W_IN) * Math.max(lv, .001), a - 22.5 + GAP, a + 22.5 - GAP));
+    document.getElementById('lv' + s).style.display = lv > 0 ? '' : 'none';
+    document.getElementById('ic' + s).textContent = id ? (ICON[id] || 'circle') : '';
+    document.getElementById('lb' + s).textContent = t?.name ?? '';
+  }
+  hub.innerHTML = st ? hubFor(st) : hubIdle();
+  hub.style.opacity = ov ? .25 : 1;
+  over.innerHTML = ov;
+  const bind = document.getElementById('bind');
+  if (!st) bind.innerHTML = 'Knob is asleep: touch a zone';
+  else {
+    const what = S.touch?.z.k === 'hub' ? (st.kind === 'climate' ? 'Heat / Cool' : st.kind === 'light' ? 'scene' : 'nothing')
+               : st.kind === 'light' ? 'brightness' : st.kind === 'climate' ? 'nudge' : 'up / down';
+    bind.innerHTML = `Knob turns <b>${esc(st.name)}</b> ${esc(what)}` + (S.touch ? ' · finger down' : ` · for ${Math.max(1, Math.ceil((S.latchUntil - now()) / 1000))} s`);
+  }
+}
+setInterval(() => { if (S.latched && !S.touch) render(); }, 1000);   // keeps the countdown honest
+connect(); render(); el.focus();
+</script>
+</body>
+</html>

@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>House Knob Concepts</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700&family=Noto+Sans:wght@400;600&display=swap">
+<style>
+  :root { --bg:#17181b; --card:#1f2125; --fg:#e9eaec; --dim:#9aa1ab; --line:#30333a; --pick:#8bc34a; --pro:#9ccc65; --con:#ff8a65; }
+  body { margin:0; background:var(--bg); color:var(--fg); font-family:'Lato',system-ui,sans-serif; font-size:15px; line-height:1.5; padding:28px 20px 60px; }
+  h1 { font-family:'Noto Sans',sans-serif; font-size:26px; margin:0 0 6px; }
+  .lede { color:var(--dim); max-width:70ch; margin:0 0 24px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(430px,1fr)); gap:20px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; display:flex; flex-direction:column; gap:10px; min-width:0; }
+  .card.pick { border-color:var(--pick); }
+  h2 { font-family:'Noto Sans',sans-serif; font-size:19px; margin:0; display:flex; gap:10px; align-items:baseline; flex-wrap:wrap; }
+  .badge { font-size:12px; font-weight:700; color:#000; background:var(--pick); border-radius:999px; padding:1px 9px; }
+  .idea { color:var(--dim); margin:0; }
+  iframe { width:100%; height:470px; border:0; border-radius:8px; background:#111; }
+  table { border-collapse:collapse; width:100%; font-size:14px; }
+  td { vertical-align:top; padding:3px 0; } td:first-child { color:var(--dim); width:64px; }
+  ul { margin:0; padding-left:18px; } li { margin:2px 0; }
+  .pro li::marker { color:var(--pro); } .con li::marker { color:var(--con); }
+  a { color:#6bbcf0; }
+  .cols { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .rec { margin-top:28px; max-width:78ch; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px 18px; }
+  .rec h2 { margin-bottom:6px; }
+</style>
+</head>
+<body>
+<h1>Four ways to drive the House Knob</h1>
+<p class="lede">Each mock is live against the real house in dry run: it shows real state and changes nothing. Scroll the mouse wheel over a device to turn the knob; click, hold and drag to touch. Open one full size to read its own instructions.</p>
+
+<div class="grid">
+  <div class="card pick">
+    <h2>Touch and turn <span class="badge">recommended</span></h2>
+    <p class="idea">Eight fixed wedges, one per thing. Whatever you touched last is what the knob turns.</p>
+    <iframe src="touch-and-turn.html" title="Touch and turn mock"></iframe>
+    <table>
+      <tr><td>Turn</td><td>Adjusts the thing you are touching, or touched in the last 8 s. Idle, it does nothing.</td></tr>
+      <tr><td>Tap</td><td>A wedge flips it (light, cover, climate on/off). The centre's left/right halves pick scene or Heat/Cool.</td></tr>
+    </table>
+    <div class="cols">
+      <ul class="pro"><li>Everything is one touch away and always in the same place</li><li>All eight states visible at once</li><li>The knob can never change something you did not just touch</li></ul>
+      <ul class="con"><li>Wedges are 9 mm at their narrow end: the tightest targets of the four</li><li>Every wedge is live, so a stray touch flips something</li><li>Holding and turning is a two-hand move; one-handed relies on the 8 s memory</li></ul>
+    </div>
+    <a href="touch-and-turn.html">Open full size</a>
+  </div>
+
+  <div class="card">
+    <h2>One thing at a time</h2>
+    <p class="idea">The whole screen is one instrument. The knob always adjusts what you see.</p>
+    <iframe src="one-thing.html" title="One thing at a time mock"></iframe>
+    <table>
+      <tr><td>Turn</td><td>Always adjusts the control on screen. No second meaning, ever.</td></tr>
+      <tr><td>Tap</td><td>Halves and quarters of the screen: Heat / Cool / Off, on/off, scenes, Up / Down. Swipe sideways for the next control.</td></tr>
+    </table>
+    <div class="cols">
+      <ul class="pro"><li>Largest zones by far: a quarter of the screen at minimum</li><li>The knob never changes meaning</li><li>Rests on the likely control (Indoors by day, Ambiance at night)</li></ul>
+      <ul class="con"><li>You see one control, not the house</li><li>Reaching a far control is 3 to 4 swipes</li><li>The screen changes by itself after idle, which can surprise</li></ul>
+    </div>
+    <a href="one-thing.html">Open full size</a>
+  </div>
+
+  <div class="card">
+    <h2>Focus ring</h2>
+    <p class="idea">Turn to move the focus round the rim, tap the centre to take hold, then the knob adjusts.</p>
+    <iframe src="focus-ring.html" title="Focus ring mock"></iframe>
+    <table>
+      <tr><td>Turn</td><td>Moves the focus round the ring; once you have taken hold of a control, adjusts it.</td></tr>
+      <tr><td>Tap</td><td>Centre takes hold and shows big buttons. A rim icon jumps straight in. Lets go after 10 s.</td></tr>
+    </table>
+    <div class="cols">
+      <ul class="pro"><li>The knob alone can reach anything</li><li>Real labelled buttons for modes, scenes, Up / Down, Save</li><li>Nothing acts until you have taken hold</li></ul>
+      <ul class="con"><li>The knob has two meanings; you must notice which</li><li>Every action costs a take-hold step first</li><li>The 10 s timeout can drop you back mid-thought</li></ul>
+    </div>
+    <a href="focus-ring.html">Open full size</a>
+  </div>
+
+  <div class="card">
+    <h2>The house as a map</h2>
+    <p class="idea">The screen is the house: roof on top, rooms in the middle, garden below. Touch the place.</p>
+    <iframe src="house-map.html" title="House map mock"></iframe>
+    <table>
+      <tr><td>Turn</td><td>Adjusts the place you touched in the last 12 s and opens its close-up. Idle, it does nothing.</td></tr>
+      <tr><td>Tap</td><td>A light switches at once. Climate and roof tiles open a full-screen close-up with big buttons.</td></tr>
+    </table>
+    <div class="cols">
+      <ul class="pro"><li>Whole-house status readable by colour and position</li><li>Close-ups give full-size buttons</li><li>Turning reveals the secondary actions by itself</li></ul>
+      <ul class="con"><li>Eight unlike things do not really form a map; it has to be learned</li><li>A tap means different things on different tiles</li><li>Climate and covers still take two taps, like a menu</li></ul>
+    </div>
+    <a href="house-map.html">Open full size</a>
+  </div>
+</div>
+
+<div class="rec">
+  <h2>Recommendation</h2>
+  <p><strong>Touch and turn</strong>, with one thing borrowed from “One thing at a time”: if the wedges prove too tight under a real finger, keep its interaction and drop to fewer, bigger zones. It is the only concept where nothing is ever more than one touch away and the knob cannot act on something you are not pointing at, and it is close to the ring you suggested, minus the separate take-hold step.</p>
+  <p>What a mouse cannot tell us is how eight wedges feel on a 46 mm screen. That is the one real risk, and the quickest way to settle it is to put the chosen layout on the knob and touch it.</p>
+</div>
+</body>
+</html>

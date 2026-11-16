@@ -152,6 +152,8 @@ class Bridge:
         app.router.add_get("/healthz", self.health)
         app.router.add_get("/", lambda r: web.HTTPFound("/sim/"))
         app.router.add_get("/sim/", lambda r: web.FileResponse(ROOT / "sim" / "index.html"))
+        app.router.add_get("/sim/concepts/", lambda r: web.FileResponse(ROOT / "sim" / "concepts" / "index.html"))
+        app.router.add_static("/sim/concepts/", ROOT / "sim" / "concepts")
 
         async def start_ha(app):
             app["ha_task"] = asyncio.create_task(self.ha.run())

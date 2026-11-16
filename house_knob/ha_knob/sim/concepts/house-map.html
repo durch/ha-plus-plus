@@ -1,0 +1,490 @@
+<!--
+  CONCEPT: House map  (slug: house-map)
+
+  IDEA  The round screen is a picture of the place, cut like a section through the house:
+        roof on top (three skylight tiles), the room on the left, the terrace's two bays on the
+        right, the garden along the bottom. Each of the 8 things is a region of that picture and
+        the region itself is the status display: ember glow = heating, blue = cooling, amber
+        tint that deepens with brightness = light on, pale sky = roof open.
+
+  TURN  The knob never navigates. It always means "more / less of the place I am touching".
+        - Finger resting on a place while turning adjusts that place (no tap is produced).
+        - A place stays "in hand" for 12 s after it was last touched, so tap-then-turn works too.
+        - Nothing touched recently: the knob does nothing and the map says "Touch a place, then
+          turn". A walk-up turn in the dark can never change something you did not point at.
+
+  TAP   On the map:
+        - a light: on / off, immediately.
+        - a climate place or a roof tile: opens its close-up (those have no safe one-tap meaning:
+          three modes, or slow motors where "flip" is ambiguous while they move).
+        - long-press (400 ms) on anything: opens its close-up.
+        - swipe up / down on a roof tile: up / down directly, no close-up.
+        The close-up is the same place magnified to the whole circle. Top cap = back to the map
+        (also automatic after 10 s). Below it:
+        - climate: middle band shows room temperature (tap it to Save when a nudge is pending),
+          bottom band is three columns Off | Heat | Cool.
+        - light: middle band = on / off, bottom band = previous / next scene (two halves);
+          swipe left / right does the same.
+        - cover: two stacked halves, Up above, Down below (Open / Closed for the windows).
+
+  VALUE ADJUSTMENT
+        Turning with a place in hand opens its close-up by itself, so the big number, the rim
+        gauge and the secondary actions (scenes, modes, Save) are in view at the moment you
+        adjust. Lights: brightness, absolute, rim arc 9 o'clock to 3 o'clock. Climate: relative
+        nudge, zero at 12 o'clock, warmer clockwise; refuses while Off and says why.
+        Covers: one detent clockwise = up/open, anticlockwise = down/closed.
+
+  PROS
+        + One rule for the knob ("touch it, turn it") and no selection step, no focus cursor.
+        + Whole-house status at a glance from across the room: you read colour and position,
+          not text. Works unread and in the dark once the layout is learned.
+        + The three lights, the most frequent act, are one tap from idle. Every target is
+          large; the smallest holds a 73 px (9.3 mm) square.
+        + Secondary actions are revealed by doing the primary one (turning opens the close-up),
+          not hidden behind a gesture you must already know.
+
+  CONS  (including what is worse than a plain menu)
+        - 8 heterogeneous things do not make a natural map. The roof tiles are three *layers* of
+          the same windows drawn side by side, and the terrace is split into an "air" bay and a
+          "lamps" bay. The picture is a mnemonic grid wearing a house costume, and it has to be
+          learned once; a list with names needs no learning.
+        - Tap is not uniform: it flips a light but opens a climate place or a roof tile. A menu
+          is slower but every row behaves the same.
+        - Climate mode and covers still cost two taps, the same as a menu. Only lights and
+          knob adjustments are actually faster.
+        - Eight regions leave room for one number each. Scene name, nudge and warnings are only
+          visible in the close-up. A list row has room for a secondary line.
+        - Long-press, swipe-on-roof and finger-held turning are invisible. They are shortcuts
+          (everything is reachable by tap + turn), but nobody will find them unaided.
+        - The idle knob is dead by design. A menu's knob always does something.
+        - Bespoke: add a ninth thing or move the heaters and the drawing and the hit zones
+          must be redone by hand. A list just grows.
+        - Reaching for a roof tile covers the garden with your hand; a rim menu keeps the
+          centre readable while you touch.
+
+  PORTING  All hit-testing is in regionAt() and tapView(): three horizontal bands and vertical
+        cuts, plain comparisons on (x, y). Gestures used: tap, long-press, swipe (4 directions),
+        finger-down-while-turning. Fonts: Lato 18-20, Noto Sans 22-28, Montserrat digits <= 48.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>House map</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700&family=Montserrat:wght@400;500&family=Noto+Sans:wght@400;500&display=swap">
+<style>
+  :root {
+    --page:#17181a; --page-ink:#d9d6cf; --page-dim:#9c9a94; --rule:#2c2d30;
+    --ink:#ebe8e2; --dim:#a3a39e; --line:#2e2f33; --base:#0f1012; --lamp-off:#4c4e53;
+    --heat:#ff7d45; --cool:#5cc8f2; --light:#ffc65c; --sky:#a9c9e8; --warn:#ffb300; --ok:#9ccc65; --live:#ff7043;
+  }
+  * { box-sizing:border-box; }
+  ::selection { background:var(--light); color:#111; }
+  html { background:var(--page); }
+  body { margin:0; min-height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center;
+         gap:28px; padding:40px 16px; color:var(--page-ink); font-family:'Lato',system-ui,sans-serif; }
+  #knob { width:360px; height:360px; flex:none; border-radius:50%; background:#000; position:relative; overflow:hidden;
+          box-shadow:0 0 0 13px #26272a, 0 0 0 15px #3b3c40, 0 18px 40px 12px rgba(0,0,0,.55);
+          user-select:none; -webkit-user-select:none; touch-action:none; cursor:pointer; outline:none; }
+  #knob:focus-visible { box-shadow:0 0 0 13px #26272a, 0 0 0 15px var(--light), 0 18px 40px 12px rgba(0,0,0,.55); }
+  #knob svg { position:absolute; inset:0; width:360px; height:360px; display:block; }
+  .view { position:absolute; inset:0; background:#000; animation:zoom .26s cubic-bezier(.16,1,.3,1) both; }
+  @keyframes zoom { from { clip-path:circle(36px at var(--ox) var(--oy)); } to { clip-path:circle(420px at var(--ox) var(--oy)); } }
+  @media (prefers-reduced-motion:reduce) { .view { animation:none; } }
+  .fl { font-family:'Lato',sans-serif; } .fn { font-family:'Noto Sans',sans-serif; } .fm { font-family:'Montserrat',sans-serif; }
+  text { font-variant-numeric:tabular-nums; }
+  .notes { max-width:54ch; display:flex; flex-direction:column; gap:14px; }
+  #run { margin:0; font-size:13px; font-weight:700; letter-spacing:.08em; color:var(--page-dim); }
+  ol { margin:0; padding:0 0 0 1.3em; font-size:15px; line-height:1.55; color:var(--page-dim); }
+  ol li + li { margin-top:6px; }
+  ol b { color:var(--page-ink); font-weight:700; }
+  kbd { font:inherit; font-size:13px; color:var(--page-ink); border:1px solid var(--rule); border-radius:4px; padding:0 5px; }
+</style>
+</head>
+<body>
+<div id="knob" tabindex="0" role="application" aria-label="House knob simulator"></div>
+<div class="notes">
+  <p id="run">CONNECTING</p>
+  <ol>
+    <li><b>The screen is the house:</b> roof tiles on top, the room left, the terrace's two bays right, the garden below. Colour is state.</li>
+    <li><b>Click a light</b> to switch it. <b>Click a climate place or a roof tile</b> to open it full-screen; click its top cap to return to the map.</li>
+    <li><b>Turn</b> (<kbd>wheel</kbd> or <kbd>↑</kbd><kbd>↓</kbd>) adjusts the place you touched last, for 12 s. Or hold the mouse button on a place and scroll: that never toggles it.</li>
+    <li><b>Press and hold</b> any place for its close-up (scenes, modes, Save). <b>Drag up or down</b> on a roof tile to move it directly.</li>
+  </ol>
+</div>
+<script>
+'use strict';
+const el = document.getElementById('knob');
+const FOCUS_MS = 12000, VIEW_MS = 10000, LONG_MS = 400, TAP_SLOP = 24, SWIPE_MIN = 40;
+
+// ---- The map: 8 regions, each a rectangle clipped by the circle. Bespoke to this house. ----
+// (x,y,w,h) is what is drawn; (cx,cy) is where the close-up grows from.
+const R = {
+  'windows':         { x:0,   y:0,   w:136, h:114, cx:86,  cy:66  },
+  'blinds':          { x:140, y:0,   w:80,  h:114, cx:180, cy:60  },
+  'shutters':        { x:224, y:0,   w:136, h:114, cx:274, cy:66  },
+  'indoors':         { x:0,   y:118, w:140, h:142, cx:76,  cy:189 },
+  'outdoors':        { x:144, y:118, w:106, h:142, cx:197, cy:189 },
+  'light.terasa':    { x:254, y:118, w:106, h:142, cx:302, cy:189 },
+  'light.ambiance':  { x:0,   y:264, w:178, h:96,  cx:106, cy:304 },
+  'light.reflektor': { x:182, y:264, w:178, h:96,  cx:254, cy:304 },
+};
+const IDS = Object.keys(R);
+const NAME = { windows:'Windows', blinds:'Blinds', shutters:'Shutters', indoors:'Indoors', outdoors:'Outdoors',
+               'light.terasa':'Terasa', 'light.ambiance':'Ambiance', 'light.reflektor':'Reflektor' };
+
+// Hit test, map: three bands, vertical cuts. Port as-is.
+function regionAt(x, y) {
+  const dx = x - 180, dy = y - 180;
+  if (dx * dx + dy * dy > 180 * 180) return null;
+  if (y < 116) return x < 138 ? 'windows' : x < 222 ? 'blinds' : 'shutters';
+  if (y < 262) return x < 142 ? 'indoors' : x < 252 ? 'outdoors' : 'light.terasa';
+  return x < 180 ? 'light.ambiance' : 'light.reflektor';
+}
+
+const S = { conn:false, states:{}, view:null, viewAt:0, focus:null, focusAt:0, lastUse:0, press:null,
+            local:{}, lastTurn:{}, lastDetent:0, toast:null, toastOk:true, toastAt:0, pulseAt:0 };
+let ws, seq = 0, longTimer = 0, toastTimer = 0;
+
+// ---- Wire ----
+function connect() {
+  const host = (location.protocol === 'file:' || !location.host) ? 'localhost:8765' : location.host;
+  ws = new WebSocket(`ws://${host}/knob/ws?knob_id=house-map&fw=sim`);
+  ws.onopen = () => { S.conn = true; render(); };
+  ws.onclose = () => { S.conn = false; setRun(null); render(); setTimeout(connect, 1500); };
+  ws.onmessage = ev => {
+    let m; try { m = JSON.parse(ev.data); } catch { return; }
+    if (m.t === 'hello') setRun(!!m.dry_run);
+    else if (m.t === 'state') S.states[m.id] = m;
+    else if (m.t === 'ack' && (!m.ok || m.message)) toast(m.message || 'That did not work', m.ok);
+    render();
+  };
+}
+function setRun(dry) {
+  const d = document.getElementById('run');
+  d.textContent = dry === null ? 'CONNECTING' : dry ? 'DRY RUN · reads the real house, changes nothing' : 'LIVE · this changes the house';
+  d.style.color = dry === null ? '' : dry ? 'var(--ok)' : 'var(--live)';
+}
+const send = m => ws && ws.readyState === 1 && ws.send(JSON.stringify({ ...m, seq: ++seq }));
+
+// ---- State helpers ----
+const now = () => Date.now();
+const turning = id => now() - (S.lastTurn[id] || 0) < 1500;
+const value = st => (turning(st.id) && S.local[st.id] != null) ? S.local[st.id] : (st.value ?? 0);
+const isOn = st => !!st && st.available && (st.kind === 'climate' ? (st.mode === 'heat' || st.mode === 'cool') : !!st.on);
+const tone = st => !isOn(st) ? null : st.kind === 'climate' ? (st.mode === 'cool' ? 'var(--cool)' : 'var(--heat)') : st.kind === 'light' ? 'var(--light)' : 'var(--sky)';
+const nudgeText = (st, v) => (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v).toFixed((st.step || 1) < 1 ? 1 : 0) + '°';
+const saveOffered = st => st.kind === 'climate' && st.mode === 'heat' && (st.actions || []).includes('save_default') && Math.abs(value(st)) > 0.01;
+const coverWords = id => id === 'windows' ? ['Open', 'Closed'] : ['Up', 'Down'];
+
+function toast(msg, ok = true) {
+  S.toast = msg; S.toastOk = ok; S.toastAt = now();
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => { S.toast = null; render(); }, 2500);
+}
+function use() { S.lastUse = now(); S.focusAt = S.lastUse; }
+function openView(id) { S.view = id; S.viewAt = now(); S.focus = id; use(); }
+function closeView() { S.view = null; S.focusAt = now(); }
+setInterval(() => {
+  if (S.press) return;
+  if (S.view && now() - S.lastUse > VIEW_MS) { S.view = null; S.focus = null; render(); }
+  else if (!S.view && S.focus && now() - S.focusAt > FOCUS_MS) { S.focus = null; render(); }
+}, 500);
+
+function usable(id) {
+  const st = S.states[id];
+  if (!st) { toast((NAME[id] || id) + ': no data yet', false); return null; }
+  if (!st.available) { toast(st.name + ' is unavailable', false); return null; }
+  return st;
+}
+function stepPreset(st, d) {
+  const n = (st.modes || []).length; if (!n) return;
+  const i = st.modes.indexOf(st.mode);
+  send({ t:'mode', id:st.id, mode: st.modes[i < 0 ? (d > 0 ? 0 : n - 1) : (i + d + n) % n] });
+}
+function moveCover(st, up) {
+  S.local[st.id] = up ? 100 : 0; S.lastTurn[st.id] = now();
+  send({ t:'adjust', id:st.id, value: up ? 100 : 0 });
+}
+
+// ---- Knob ----
+function turn(dir) {
+  const p = S.press;
+  if (p) { p.turned = true; clearTimeout(longTimer); }
+  const id = p ? p.id : S.view || S.focus;
+  if (!id) { S.pulseAt = now(); toast('Touch a place, then turn'); setTimeout(render, 950); return render(); }
+  const st = usable(id); if (!st) return render();
+  if (S.view !== id) openView(id);          // adjusting shows the close-up: value, gauge, secondary actions
+  use();
+  if (st.kind === 'cover') {
+    const up = dir > 0;
+    if (!(turning(id) && S.local[id] === (up ? 100 : 0))) moveCover(st, up);
+    else S.lastTurn[id] = now();
+    return render();
+  }
+  if (!st.adjustable) { toast(st.kind === 'climate' ? 'Off. Choose Heat or Cool first' : 'Nothing to adjust here'); return render(); }
+  const t = now(), fast = st.kind === 'light' && t - S.lastDetent < 45; S.lastDetent = t;
+  const step = st.step || 1, lo = st.min ?? 0, hi = st.max ?? 100;
+  let v = value(st) + dir * step * (fast ? 3 : 1);
+  v = Math.min(hi, Math.max(lo, +(Math.round(v / step) * step).toFixed(2)));
+  S.local[id] = v; S.lastTurn[id] = t;
+  send({ t:'adjust', id, value:v });
+  setTimeout(render, 1600);
+  render();
+}
+
+// ---- Touch: down / move / up with (x, y). Same pipeline on the device. ----
+function down(x, y) {
+  const id = S.view || regionAt(x, y);
+  if (!id || Math.hypot(x - 180, y - 180) > 180) return;
+  S.press = { x0:x, y0:y, x, y, t:now(), id, view:S.view, turned:false, fired:false };
+  if (!S.view) { S.focus = id; S.focusAt = now(); }
+  use();
+  clearTimeout(longTimer);
+  longTimer = setTimeout(() => {
+    const p = S.press;
+    if (!p || p.turned || p.view || Math.hypot(p.x - p.x0, p.y - p.y0) > TAP_SLOP) return;
+    if (usable(p.id)) { p.fired = true; openView(p.id); }
+    render();
+  }, LONG_MS);
+  render();
+}
+function move(x, y) { if (S.press) { S.press.x = x; S.press.y = y; } }
+function up() {
+  const p = S.press; if (!p) return;
+  S.press = null; clearTimeout(longTimer); use();
+  // A press that turned the knob, opened a close-up, or outlived its view is not a tap.
+  if (p.fired || p.turned || p.view !== S.view) return render();
+  const dx = p.x - p.x0, dy = p.y - p.y0, d = Math.hypot(dx, dy);
+  if (d >= SWIPE_MIN) swipe(Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up'), p);
+  else if (d <= TAP_SLOP) { if (p.view) tapView(p.x0, p.y0); else tapMap(p.id); }
+  render();
+}
+function tapMap(id) {
+  const st = usable(id); if (!st) return;
+  if (st.kind === 'light') send({ t:'toggle', id });   // the one-tap act; stays in hand for the knob
+  else openView(id);                                   // climate and covers ask which way
+}
+// Hit test, close-up: top cap, then bands / columns by kind. Port as-is.
+function tapView(x, y) {
+  const st = S.states[S.view];
+  if (y < 92 || !st) return closeView();
+  if (!st.available) return toast(st.name + ' is unavailable', false);
+  if (st.kind === 'climate') {
+    if (y < 205) { if (saveOffered(st)) send({ t:'action', id:st.id, name:'save_default' }); return; }
+    return send({ t:'mode', id:st.id, mode: x < 130 ? 'off' : x < 230 ? 'heat' : 'cool' });
+  }
+  if (st.kind === 'light') {
+    if (y < 205) return send({ t:'toggle', id:st.id });
+    return stepPreset(st, x < 180 ? -1 : 1);
+  }
+  moveCover(st, y < 222);
+}
+function swipe(dir, p) {
+  const st = S.states[p.id]; if (!st || !st.available) return;
+  if (st.kind === 'cover' && (dir === 'up' || dir === 'down')) {
+    moveCover(st, dir === 'up');
+    if (!p.view) toast(`${st.name}: ${coverWords(st.id)[dir === 'up' ? 0 : 1].toLowerCase()}`);
+  } else if (p.view && st.kind === 'light' && (dir === 'left' || dir === 'right')) stepPreset(st, dir === 'left' ? 1 : -1);
+}
+
+// ---- Simulator input ----
+const at = e => { const b = el.getBoundingClientRect(); return [(e.clientX - b.left) * 360 / b.width, (e.clientY - b.top) * 360 / b.height]; };
+el.addEventListener('pointerdown', e => { el.focus(); try { el.setPointerCapture(e.pointerId); } catch {} down(...at(e)); e.preventDefault(); });
+el.addEventListener('pointermove', e => move(...at(e)));
+el.addEventListener('pointerup', () => up());
+el.addEventListener('pointercancel', () => { S.press = null; clearTimeout(longTimer); render(); });
+el.addEventListener('contextmenu', e => e.preventDefault());
+let wheelAcc = 0;
+el.addEventListener('wheel', e => {
+  e.preventDefault();
+  const d = e.deltaMode === 1 ? e.deltaY * 40 : e.deltaY;
+  if (Math.abs(d) >= 50) { wheelAcc = 0; return turn(d > 0 ? 1 : -1); }
+  wheelAcc += d;                                   // trackpads: one detent per 50 px of scroll
+  if (Math.abs(wheelAcc) >= 50) { turn(wheelAcc > 0 ? 1 : -1); wheelAcc = 0; }
+}, { passive:false });
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowUp') turn(1); else if (e.key === 'ArrowDown') turn(-1); else return;
+  e.preventDefault();
+});
+
+// ---- Drawing ----
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
+const fit = (s, base, maxW, k = 0.58) => Math.min(base, Math.floor(maxW / (k * Math.max(1, String(s).length))));
+const T = (x, y, s, size, cls, fill, extra = '') => `<text x="${x}" y="${y}" font-size="${size}" class="${cls}" fill="${fill}" text-anchor="middle" ${extra}>${esc(s)}</text>`;
+function arcPath(r, a0, a1) {                      // angles clockwise from 12 o'clock
+  const pt = a => { const t = (a - 90) * Math.PI / 180; return [180 + r * Math.cos(t), 180 + r * Math.sin(t)]; };
+  const [x0, y0] = pt(a0), [x1, y1] = pt(a1);
+  return `M${x0.toFixed(1)},${y0.toFixed(1)} A${r},${r} 0 ${a1 - a0 > 180 ? 1 : 0} 1 ${x1.toFixed(1)},${y1.toFixed(1)}`;
+}
+const DEFS = p => `<defs>
+  <clipPath id="${p}disc"><circle cx="180" cy="180" r="178"/></clipPath>
+  ${IDS.map((id, i) => { const g = R[id]; return `<clipPath id="${p}r${i}"><rect x="${g.x}" y="${g.y}" width="${g.w}" height="${g.h}" rx="9"/></clipPath>`; }).join('')}
+  <radialGradient id="${p}heat" cx=".5" cy=".62" r=".75"><stop offset="0" stop-color="#ff7d45" stop-opacity=".62"/><stop offset="1" stop-color="#ff7d45" stop-opacity=".14"/></radialGradient>
+  <radialGradient id="${p}cool" cx=".5" cy=".62" r=".75"><stop offset="0" stop-color="#5cc8f2" stop-opacity=".5"/><stop offset="1" stop-color="#5cc8f2" stop-opacity=".12"/></radialGradient>
+</defs>`;
+
+function coverGlyph(id, open, x, y, col) {
+  let h = `<g fill="none" stroke="${col}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round">`;
+  if (id === 'windows') {
+    h += open ? `<rect x="${x - 20}" y="${y - 10}" width="40" height="24" rx="3"/><path d="M${x - 20},${y + 14} L${x - 11},${y - 24} L${x + 29},${y - 24} L${x + 20},${y + 14}" fill="${col}" fill-opacity=".22"/>`
+              : `<rect x="${x - 20}" y="${y - 14}" width="40" height="28" rx="3"/><rect x="${x - 13}" y="${y - 7}" width="26" height="14" rx="1.5" stroke-width="2"/>`;
+  } else if (id === 'blinds') {
+    h += `<rect x="${x - 20}" y="${y - 14}" width="40" height="28" rx="3"/>`;
+    for (const dy of open ? [-8, -3] : [-8, -3, 2, 7]) h += `<path d="M${x - 14},${y + dy} H${x + 14}"/>`;
+  } else {
+    h += `<rect x="${x - 20}" y="${y - 14}" width="40" height="28" rx="3"/>`;
+    h += open ? `<rect x="${x - 20}" y="${y - 14}" width="40" height="8" rx="3" fill="${col}"/>`
+              : `<rect x="${x - 20}" y="${y - 14}" width="40" height="28" rx="3" fill="${col}" fill-opacity=".8"/><path d="M${x - 19},${y - 5} H${x + 19} M${x - 19},${y + 3} H${x + 19}" stroke="#0f1012" stroke-width="2"/>`;
+  }
+  return h + '</g>';
+}
+
+function mapRegion(id, i) {
+  const g = R[id], st = S.states[id], c = tone(st), ok = st && st.available;
+  const pressed = S.press && !S.press.view && S.press.id === id;
+  const mid = { windows:[100, 84], blinds:[180, 180], shutters:[260, 276] }[id];
+  let h = `<g clip-path="url(#mr${i})"><rect x="${g.x}" y="${g.y}" width="${g.w}" height="${g.h}" fill="var(--base)"/>`;
+  const kind = st ? st.kind : id.startsWith('light.') ? 'light' : (id === 'indoors' || id === 'outdoors') ? 'climate' : 'cover';
+
+  if (kind === 'climate') {
+    if (c) h += `<rect x="${g.x}" y="${g.y}" width="${g.w}" height="${g.h}" fill="url(#m${st.mode === 'cool' ? 'cool' : 'heat'})"/>`;
+    const big = id === 'indoors', x = big ? 78 : 197, p = ok ? (st.primary || '–') : '–';
+    h += T(x, 148, NAME[id], 20, 'fl', c ? 'var(--ink)' : 'var(--dim)');
+    h += T(x, big ? 202 : 198, p, fit(p, big ? 40 : 30, big ? 124 : 96, 0.62), 'fm', c ? 'var(--ink)' : 'var(--dim)');
+    const v = ok ? value(st) : 0;
+    const line = !ok ? 'no signal' : !c ? 'Off' : (st.mode === 'cool' ? 'Cool' : 'Heat') + (Math.abs(v) > 0.01 ? ' ' + nudgeText(st, v) : '');
+    h += T(x, 238, line, fit(line, 20, big ? 124 : 98, 0.5), 'fl', c || 'var(--dim)', c ? 'font-weight="700"' : '');
+  } else if (kind === 'light') {
+    const f = c ? Math.max(0.06, Math.min(1, value(st) / 100)) : 0;
+    if (c) h += `<rect x="${g.x}" y="${g.y}" width="${g.w}" height="${g.h}" fill="var(--light)" fill-opacity="${(0.1 + 0.3 * f).toFixed(2)}"/>`;   // brighter lamp, brighter place
+    const lamp = c || 'var(--lamp-off)', pct = !ok ? '–' : c ? Math.round(value(st)) + '%' : 'Off';
+    if (id === 'light.terasa') {
+      h += T(300, 148, NAME[id], 20, 'fl', c ? 'var(--ink)' : 'var(--dim)');
+      h += `<path d="M262,164 Q301,192 340,164" fill="none" stroke="var(--lamp-off)" stroke-width="1.5"/>`;
+      for (let k = 0; k < 7; k++) { const u = (k - 3) / 3; h += `<circle cx="${268 + k * 11}" cy="${169 + 10 * (1 - u * u)}" r="4.5" fill="${lamp}"/>`; }
+      h += T(300, 232, pct, 26, 'fm', c || 'var(--dim)');
+    } else if (id === 'light.ambiance') {
+      for (const x of [86, 106, 126]) h += `<path d="M${x},283 V292" stroke="var(--lamp-off)" stroke-width="2.5" stroke-linecap="round"/><circle cx="${x}" cy="279" r="5" fill="${lamp}"/>`;
+      h += T(110, 316, NAME[id], 20, 'fl', c ? 'var(--ink)' : 'var(--dim)') + T(120, 340, pct, 20, 'fl', c || 'var(--dim)', 'font-weight="700"');
+    } else {
+      h += `<path d="M247,277 L276,268 V294 L247,285 Z" fill="${lamp}" fill-opacity="${c ? .45 : .25}"/><circle cx="242" cy="281" r="6" fill="${lamp}"/>`;
+      h += T(250, 316, NAME[id], 20, 'fl', c ? 'var(--ink)' : 'var(--dim)') + T(240, 340, pct, 20, 'fl', c || 'var(--dim)', 'font-weight="700"');
+    }
+  } else {
+    if (c) h += `<rect x="${g.x}" y="${g.y}" width="${g.w}" height="${g.h}" fill="var(--sky)" fill-opacity=".16"/>`;
+    const moving = ok && turning(id) && S.local[id] != null && (S.local[id] > 0) !== !!st.on;
+    h += coverGlyph(id, ok ? (moving ? S.local[id] > 0 : !!st.on) : false, mid[0], 56, c || 'var(--dim)');
+    h += T(mid[1], 104, NAME[id], 20, 'fl', c ? 'var(--ink)' : 'var(--dim)');
+  }
+  if (st && st.warning) h += `<circle cx="${g.cx}" cy="${g.y + 16 + (g.y === 0 ? 14 : 0)}" r="5" fill="var(--warn)"/>`;
+  if (pressed) h += `<rect x="${g.x}" y="${g.y}" width="${g.w}" height="${g.h}" fill="#fff" fill-opacity=".08"/>`;
+  return h + '</g>';
+}
+
+function drawMap() {
+  const pulse = now() - S.pulseAt < 900;
+  let h = `<svg viewBox="0 0 360 360" aria-hidden="true">${DEFS('m')}<g clip-path="url(#mdisc)">`;
+  IDS.forEach((id, i) => { h += mapRegion(id, i); });
+  IDS.forEach(id => {
+    const g = R[id], f = S.focus === id && !S.view, st = S.states[id];
+    h += `<rect x="${g.x + 1}" y="${g.y + 1}" width="${g.w - 2}" height="${g.h - 2}" rx="8" fill="none" stroke="${f ? 'var(--ink)' : pulse ? '#6d6f75' : 'var(--line)'}" stroke-width="${f ? 3 : 1.5}" ${st && !st.available ? 'stroke-dasharray="5 6"' : ''}/>`;
+  });
+  h += `</g><circle cx="180" cy="180" r="178" fill="none" stroke="var(--line)" stroke-width="1.5"/>`;
+  if (!S.view) h += drawToast();
+  return h + '</svg>';
+}
+
+function drawToast() {
+  if (!S.toast) return '';
+  const fs = fit(S.toast, 19, 250, 0.5);
+  return `<rect x="38" y="156" width="284" height="48" rx="24" fill="#000" stroke="${S.toastOk ? '#55575c' : 'var(--warn)'}" stroke-width="1.5"/>` +
+         T(180, 180 + fs * 0.35, S.toast, fs, 'fl', S.toastOk ? 'var(--ink)' : 'var(--warn)');
+}
+
+function drawView(id) {
+  const st = S.states[id], g = R[id], c = tone(st), col = c || 'var(--dim)';
+  let h = `<svg viewBox="0 0 360 360" aria-hidden="true">${DEFS('v')}<g clip-path="url(#vdisc)">`;
+  // top cap: where you are on the map, and the way back
+  const mx = 180 + (g.cx - 180) / 180 * 13, my = 36 + (g.cy - 180) / 180 * 13;
+  h += `<circle cx="180" cy="36" r="15" fill="none" stroke="var(--dim)" stroke-width="1.5"/><path d="M166.5,31 H193.5 M167.5,44 H192.5" stroke="var(--dim)" stroke-width="1.2"/><circle cx="${mx.toFixed(1)}" cy="${my.toFixed(1)}" r="4" fill="${c || 'var(--ink)'}"/>`;
+  h += T(180, 82, st ? st.name : NAME[id], 26, 'fn', 'var(--ink)', 'font-weight="500"');
+  h += `<path d="M24,92 H336" stroke="var(--line)" stroke-width="1.5"/>`;
+  if (!st || !st.available) {
+    h += T(180, 190, 'Unavailable', 28, 'fn', 'var(--dim)') + T(180, 232, 'tap the top to go back', 18, 'fl', 'var(--dim)');
+    return h + '</g>' + drawToast() + '</svg>';
+  }
+  const v = value(st), turningNow = turning(id);
+
+  if (st.kind === 'climate') {
+    const big = turningNow && st.adjustable ? nudgeText(st, v) : (st.primary || '–');
+    h += T(180, 152, big, fit(big, 48, 250, 0.62), 'fm', 'var(--ink)', 'font-weight="500"');
+    if (st.warning) h += T(180, 190, st.warning, fit(st.warning, 19, 280, 0.5), 'fl', 'var(--warn)');
+    else if (saveOffered(st)) {
+      const s = `Save ${nudgeText(st, v)} as default`;
+      h += `<rect x="62" y="166" width="236" height="34" rx="17" fill="none" stroke="var(--warn)" stroke-width="2"/>` + T(180, 190, s, 19, 'fl', 'var(--warn)', 'font-weight="700"');
+    } else {
+      const s = !c ? 'Off' : turningNow ? `room ${st.primary || '–'}` : Math.abs(v) > 0.01 ? `${nudgeText(st, v)} from usual` : 'turn to nudge warmer or cooler';
+      h += T(180, 190, s, 19, 'fl', 'var(--dim)');
+    }
+    if (st.adjustable) {                              // rim gauge, zero at 12 o'clock
+      h += `<path d="${arcPath(170, -90, 90)}" fill="none" stroke="#1d1e22" stroke-width="8" stroke-linecap="round"/>`;
+      const a = Math.max(-90, Math.min(90, v / (st.max || 5) * 90));
+      if (Math.abs(a) > 0.5) h += `<path d="${a > 0 ? arcPath(170, 0, a) : arcPath(170, a, 0)}" fill="none" stroke="${col}" stroke-width="8" stroke-linecap="round"/>`;
+      h += `<path d="M180,4 V15" stroke="var(--ink)" stroke-width="2.5" stroke-linecap="round"/>`;
+    }
+    const cols = [['off', 'Off', 0, 128, 76, '#474a51', 'var(--ink)'], ['heat', 'Heat', 132, 96, 180, 'var(--heat)', '#0b0b0c'], ['cool', 'Cool', 232, 128, 284, 'var(--cool)', '#0b0b0c']];
+    for (const [m, label, x, w, tx, fill, ink] of cols) {
+      const on = st.mode === m;
+      h += `<rect x="${x}" y="207" width="${w}" height="160" rx="9" fill="${on ? fill : 'var(--base)'}" stroke="${on ? 'none' : 'var(--line)'}" stroke-width="1.5"/>`;
+      h += T(tx, 266, label, 26, 'fn', on ? ink : 'var(--dim)', on ? 'font-weight="500"' : '');
+    }
+  } else if (st.kind === 'light') {
+    const big = st.on ? Math.round(v) + '%' : 'Off';
+    h += `<path d="${arcPath(170, -90, 90)}" fill="none" stroke="#1d1e22" stroke-width="8" stroke-linecap="round"/>`;
+    if (st.on && v > 0) h += `<path d="${arcPath(170, -90, -90 + 180 * Math.min(1, v / 100))}" fill="none" stroke="var(--light)" stroke-width="8" stroke-linecap="round"/>`;
+    h += T(180, 152, big, 48, 'fm', st.on ? 'var(--light)' : 'var(--dim)', 'font-weight="500"');
+    h += T(180, 190, st.warning || (st.on ? 'tap here to switch off' : 'tap here to switch on'), 19, 'fl', st.warning ? 'var(--warn)' : 'var(--dim)');
+    h += `<path d="M2,206 H358" stroke="var(--line)" stroke-width="1.5"/>`;
+    const n = (st.modes || []).length;
+    if (!n) h += T(180, 270, 'No scenes', 22, 'fn', 'var(--dim)');
+    else {
+      const i = st.modes.indexOf(st.mode), name = i < 0 ? 'Scenes' : st.mode;
+      h += T(180, 238, name, fit(name, 22, 270, 0.56), 'fn', i < 0 ? 'var(--dim)' : 'var(--ink)');
+      for (let k = 0; k < n; k++) h += `<circle cx="${180 + (k - (n - 1) / 2) * 13}" cy="256" r="${k === i ? 4 : 2.5}" fill="${k === i ? 'var(--light)' : '#5a5c61'}"/>`;
+      h += `<path d="M180,272 V352" stroke="var(--line)" stroke-width="1.5"/>`;
+      h += `<path d="M106,282 L88,302 L106,322" fill="none" stroke="var(--ink)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/><path d="M254,282 L272,302 L254,322" fill="none" stroke="var(--ink)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>`;
+    }
+  } else {
+    const [upWord, downWord] = coverWords(id);
+    const target = turningNow && S.local[id] != null ? S.local[id] > 0 : !!st.on;
+    const zone = (y, hgt, on, label, ty, chev) =>
+      `<rect x="-4" y="${y}" width="368" height="${hgt}" rx="9" fill="${on ? 'var(--sky)' : 'var(--base)'}" stroke="${on ? 'none' : 'var(--line)'}" stroke-width="1.5"/>` +
+      `<path d="${chev}" fill="none" stroke="${on ? '#0b0b0c' : 'var(--dim)'}" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>` +
+      T(180, ty, label, 28, 'fn', on ? '#0b0b0c' : 'var(--dim)', on ? 'font-weight="500"' : '');
+    h += zone(96, 124, target, upWord, 190, 'M158,142 L180,120 L202,142');
+    h += zone(224, 150, !target, downWord, 268, 'M158,292 L180,314 L202,292');
+    if (st.warning) h += T(180, 214, st.warning, 17, 'fl', 'var(--warn)');
+  }
+  return h + '</g>' + drawToast() + '</svg>';
+}
+
+function render() {
+  if (!S.conn || !Object.keys(S.states).length) {
+    el.innerHTML = `<svg viewBox="0 0 360 360">${T(180, 174, S.conn ? 'Reading the house…' : 'Connecting to bridge…', 22, 'fl', 'var(--dim)')}${T(180, 204, 'localhost:8765', 16, 'fl', '#6a6c70')}</svg>`;
+    return;
+  }
+  let h = drawMap();
+  if (S.view) {
+    const g = R[S.view], age = now() - S.viewAt;
+    // negative delay keeps the zoom running across re-renders instead of restarting it
+    h += `<div class="view" style="--ox:${g.cx}px;--oy:${g.cy}px;animation-delay:${-Math.min(age, 400)}ms">${drawView(S.view)}</div>`;
+  }
+  el.innerHTML = h;
+}
+connect(); render(); el.focus();
+</script>
+</body>
+</html>

@@ -1,0 +1,545 @@
+<!--
+  CONCEPT: One thing at a time            slug: one-thing
+
+  THE IDEA
+    The whole screen is a single instrument (a thermostat, a dimmer, a blind switch) that can
+    become eight different instruments; nothing ever shares the screen, so every zone is a
+    half or a quarter of the glass and the knob never has a second meaning.
+
+  TURN
+    Always adjusts the instrument on screen. There is no browse mode and no "take hold" step.
+      climate  nudge warmer / cooler (bridge min/max/step). Ignored while Off, with a one-line hint.
+      light    brightness.
+      cover    three detents the same way within 0.7 s = Up/Open (clockwise) or Down/Closed.
+               Three, not one, so that a bump of the ring cannot open the roof windows.
+    One guard: when the screen has dimmed after idle, the first twist only wakes it (detents
+    are swallowed for 350 ms). Twisting is the one input people do without looking.
+
+  TAP  (geometry only: hub radius, equator y = 180, meridian x = 180; see zoneAt())
+      climate  upper-left quarter = Heat, upper-right quarter = Cool, lower half = Off.
+               (Hot on the left, cold on the right, like a tap.) The hub (r < 84) is the readout.
+      light    upper half + hub = on/off. Lower-left quarter = previous scene, lower-right = next.
+      cover    upper half = Up/Open, lower half = Down/Closed, with a 48 px dead band on the equator.
+    HOLD (400 ms) on the hub of Indoors = Save the nudge. Hub only, so an abandoned hold can
+    never land on Off. A short tap on the hub just says "hold to save".
+
+  MOVING BETWEEN THE EIGHT
+    Swipe left / right = next / previous instrument in one fixed ring (bridge layout order:
+    climate, climate | light, light, light | cover, cover, cover). It wraps, so nothing is more
+    than 4 swipes away. Eight dots on the bottom rim show position, grouped 2 | 3 | 3, and each
+    dot carries its instrument's colour when that thing is on, so the dots double as a
+    "what is running" glance. The dots are an indicator, never a target.
+    On covers a vertical swipe is an alias: swipe up = Up, swipe down = Down. This is error
+    protection, not decoration: an upward swipe starts in the lower half, and if it were read
+    as a tap it would do the opposite of what the hand meant.
+
+  HOME (the automatic part, argued honestly)
+    After 20 s idle (mock; 30 to 45 s on the device) the screen dims and returns Home.
+    Home is one of exactly two instruments, by one sentence:
+        "If Ambiance is on, or it is dark (17:00 to 07:00 in the mock), it is the dimmer.
+         Otherwise it is the thermostat."
+    Inputs used: the Ambiance state message and the clock. Nothing else.
+    Why return at all: the knob acts on whatever is on screen, so a device left on Shutters is
+    a trap for the next person. A known resting place is what makes "in passing" use possible.
+    Why only two candidates: a rule that can land on any of eight is unpredictable without
+    reading, and reading is what this device must not require. Both conditions are things a
+    person in the room already knows (is the lamp on, is it dark), so they can predict the
+    screen before looking at it.
+    Where it still surprises: (1) someone who walks away mid-task for longer than the timeout
+    comes back to a different instrument; (2) at the 17:00 / 07:00 flip the resting screen
+    changes with nobody touching it; (3) a blind tap on the upper half means "light on/off"
+    at night and "Heat or Cool" by day. (3) is the real hazard. Mitigations: each kind has its
+    own colour and glow geometry that reads in peripheral vision, the dim screen is always on
+    and always truthful, and blind twists are guarded. It is not eliminated.
+    "Which light is the living-room one" is an assumption (HOME_LIGHT = light.ambiance).
+    The page offers Smart / Indoors always / Stay put so the three can be compared by hand.
+    My recommendation: ship Smart, but if field use shows even a few wrong blind taps on
+    climate, fall back to "Indoors always"; a fixed home loses a swipe at night, a wrong
+    Heat/Cool costs trust.
+
+  VALUE ADJUSTMENT
+    Sends {"t":"adjust"} with the absolute value on every detent (bridge debounces). The local
+    value is shown for 1.5 s after the last detent, then the bridge's state takes over. The rim
+    arc is the gauge: bipolar from 12 o'clock for a climate nudge, sweep for brightness.
+
+  PROS
+    + Zones are enormous: the smallest is a quarter of the glass, 96 px (12.3 mm) deep.
+    + The knob has exactly one meaning, so there is no mode to be in the wrong one of.
+    + From rest, the likely job is zero swipes away, and each instrument can use the layout
+      that suits it (a tap's hot/cold, a switch's up/down) instead of a generic menu row.
+  CONS (including what gets worse than a plain menu)
+    - You cannot see the eight at once. A menu shows the whole house on one screen; here the
+      overview is eight coloured dots. Reaching the far side of the ring is 3 to 4 swipes,
+      where a rim menu is one tap.
+    - The screen changes by itself (Home). Everything in the HOME section above is a cost a
+      menu that stays put does not have.
+    - Swipes are slower and less certain than taps on a 46 mm disc, and the order has to be
+      learned; Save is a hidden hold; the cover's 3-detent threshold makes the knob feel
+      slightly reluctant on covers.
+
+  FIRMWARE NOTES
+    Text uses only Lato 22, Noto Sans 28 and Montserrat 48. Montserrat is used for strings made
+    of digits and . + - ° % only; every word is Noto Sans 28 or Lato 22. Chevrons are three-point
+    polylines. Glows are a radial alpha ramp inside a sector. Velocity is not modelled here.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>One thing at a time · House Knob</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700&family=Montserrat:wght@400&family=Noto+Sans:wght@400&display=swap">
+<style>
+  :root {
+    --page:#151517; --panel:#1e1e21; --line:#303035; --ink:#e4e4e8; --ink2:#a4a4ad;
+    --heat:#ff8f4d; --cool:#5cc8f5; --light:#ffd36a; --cover:#a9dfa0; --warn:#ffb84a; --live:#ff6a4a;
+  }
+  * { box-sizing:border-box; }
+  ::selection { background:#5a4a22; color:#fff; }
+  html { background:var(--page); }
+  body { margin:0; min-height:100vh; display:flex; flex-direction:column; align-items:center; gap:22px;
+         padding:36px 16px 48px; background:var(--page); color:var(--ink);
+         font:16px/1.55 'Lato',system-ui,sans-serif; }
+  h1 { margin:0; font:400 28px/1.2 'Noto Sans',sans-serif; letter-spacing:-0.01em; text-wrap:balance; text-align:center; }
+
+  /* The object: a knurled encoder ring around a round AMOLED. */
+  .stage { position:relative; width:420px; height:420px; flex:none; }
+  #ring { position:absolute; inset:0; border-radius:50%;
+          background:repeating-conic-gradient(#3b3b41 0 1.5deg, #232326 1.5deg 6deg);
+          box-shadow:0 18px 40px -12px rgba(0,0,0,.8), inset 0 0 0 1px #4a4a51;
+          transition:transform .18s cubic-bezier(.16,1,.3,1); }
+  #ring::after { content:''; position:absolute; inset:22px; border-radius:50%; background:#0a0a0b; box-shadow:0 0 0 1px #000; }
+  #knob { position:absolute; left:30px; top:30px; width:360px; height:360px; border-radius:50%; overflow:hidden;
+          background:#000; user-select:none; -webkit-user-select:none; touch-action:none; cursor:pointer; outline:none; }
+  #knob:focus-visible { box-shadow:0 0 0 2px var(--light); }
+  #knob svg { position:absolute; inset:0; width:360px; height:360px; pointer-events:none; transition:opacity .6s ease; }
+  #knob.asleep svg { opacity:.42; }
+  .t-name { font:400 28px 'Noto Sans',sans-serif; }
+  .t-num  { font:400 48px 'Montserrat',sans-serif; }
+  .t-lab  { font:400 22px 'Lato',sans-serif; }
+  text { text-anchor:middle; dominant-baseline:central; }
+  .hold { stroke-dasharray:528; stroke-dashoffset:528; animation:hold .4s linear forwards; }
+  @keyframes hold { to { stroke-dashoffset:0; } }
+
+  .meta { display:flex; flex-wrap:wrap; gap:10px 14px; align-items:center; justify-content:center; font-size:14px; color:var(--ink2); }
+  #mode { font-weight:700; letter-spacing:.06em; padding:3px 10px; border-radius:4px; border:1px solid var(--line); color:var(--ink2); }
+  #mode.dry { color:var(--cover); border-color:#3c5a39; }
+  #mode.live { color:var(--live); border-color:#6a3327; }
+  .help { max-width:60ch; margin:0; padding:0; list-style:none; color:var(--ink); font-size:15px; }
+  .help li { padding:7px 0; border-top:1px solid var(--line); }
+  .help li:first-child { border-top:0; }
+  .help b { font-weight:700; color:#fff; }
+  kbd { font:inherit; font-size:13px; background:var(--panel); border:1px solid var(--line); border-radius:4px; padding:0 5px; }
+  .rig { display:flex; flex-wrap:wrap; gap:10px 18px; align-items:center; justify-content:center; font-size:14px; color:var(--ink2); max-width:60ch; }
+  .seg { display:inline-flex; border:1px solid var(--line); border-radius:6px; overflow:hidden; }
+  .seg button, .rig > button { font:inherit; color:var(--ink2); background:var(--panel); border:0; padding:6px 11px; cursor:pointer; }
+  .seg button + button { border-left:1px solid var(--line); }
+  .rig > button { border:1px solid var(--line); border-radius:6px; }
+  .seg button:hover, .rig > button:hover { color:#fff; }
+  .seg button[aria-pressed=true] { background:#3a3320; color:var(--light); }
+  button:focus-visible { outline:2px solid var(--light); outline-offset:-2px; }
+  #homeline { font-size:14px; color:var(--ink2); text-align:center; min-height:1.5em; margin:-8px 0 0; }
+  @media (max-width:460px) { .stage { transform:scale(.8); margin:-42px; } }
+  @media (prefers-reduced-motion:reduce) { #ring, #knob svg { transition:none; } }
+</style>
+</head>
+<body>
+<h1>One thing at a time</h1>
+
+<div class="stage" id="stage">
+  <div id="ring"></div>
+  <div id="knob" tabindex="0" role="application" aria-label="House knob simulator">
+    <svg id="card" viewBox="0 0 360 360"></svg>
+    <svg id="chrome" viewBox="0 0 360 360"></svg>
+  </div>
+</div>
+
+<div class="meta"><span id="mode">CONNECTING</span><span id="link"></span></div>
+
+<ul class="help">
+  <li><b>Turn</b> (<kbd>wheel</kbd> or <kbd>↑</kbd> <kbd>↓</kbd>) always adjusts what is on screen: the temperature nudge, the brightness, or, with three clicks the same way, a cover.</li>
+  <li><b>Swipe sideways</b> (drag, or <kbd>←</kbd> <kbd>→</kbd>) for the next or previous instrument. The dots at the bottom show where you are: climate, lights, covers.</li>
+  <li><b>Tap the big zones.</b> Climate: upper-left Heat, upper-right Cool, lower half Off. Lights: upper half on/off, lower quarters previous / next scene. Covers: upper half up, lower half down.</li>
+  <li><b>Press and hold the temperature</b> on Indoors to save the nudge.</li>
+  <li>After 20 s untouched it dims and goes <b>Home</b>: Ambiance when that light is on or it is dark, otherwise Indoors. The first twist after that only wakes it.</li>
+</ul>
+
+<div class="rig">
+  <span>Home <span class="seg" id="segPolicy">
+    <button data-v="smart">Smart</button><button data-v="indoors">Indoors always</button><button data-v="stay">Stay put</button></span></span>
+  <span>Clock <span class="seg" id="segClock">
+    <button data-v="real">Real</button><button data-v="day">Day</button><button data-v="night">Night</button></span></span>
+  <button id="sleepNow">Sleep now</button>
+</div>
+<p id="homeline"></p>
+
+<script>
+// ───────────────────────── constants (all of this ports to C as-is) ─────────────────────────
+const CX = 180, CY = 180, R = 180;
+const HUB = 84;            // hub radius: readout (climate), part of the toggle (light)
+const BAND = 24;           // covers: dead band of +-24 px round the equator
+const SWIPE_PX = 44;       // travel on the dominant axis that makes a swipe
+const TAP_SLOP = 12;       // travel that cancels a tap / hold
+const HOLD_MS = 400;
+const IDLE_MS = 20000;     // mock value; 30-45 s suggested on the device
+const WAKE_GUARD_MS = 350; // detents swallowed after a twist wakes the screen
+const COVER_DETENTS = 3, COVER_WINDOW_MS = 700;
+const HOME_LIGHT = 'light.ambiance', HOME_CLIMATE = 'indoors';   // assumptions about this house
+const DARK_FROM = 17, DARK_UNTIL = 7;
+
+const COL = { heat:'#ff8f4d', cool:'#5cc8f5', light:'#ffd36a', cover:'#a9dfa0', warn:'#ffb84a',
+              ink:'#f2f2f4', dim:'#8f8f97', faint:'#6c6c74', track:'#222226' };
+const Z = { NONE:0, HUB:1, HEAT:2, COOL:3, OFF:4, TOGGLE:5, PREV:6, NEXT:7, UP:8, DOWN:9 };
+
+const S = { conn:false, dry:null, order:[], groups:[], states:{}, sel:0, placed:false,
+            local:{}, lastTurn:{}, ack:null, ackOk:true, hint:null, hintT:0,
+            press:null, arm:{ id:null, dir:0, n:0, t:0 }, asleep:false, lastUse:Date.now(), guardUntil:0,
+            policy:'smart', clock:'real', ringDeg:0 };
+let ws, seq = 0;
+
+// ───────────────────────── bridge ─────────────────────────
+function connect() {
+  const host = location.protocol === 'file:' ? 'localhost:8765' : location.host;
+  ws = new WebSocket(`ws://${host}/knob/ws?knob_id=one-thing&fw=sim`);
+  ws.onopen = () => { S.conn = true; render(); };
+  ws.onclose = () => { S.conn = false; render(); setTimeout(connect, 1500); };
+  ws.onmessage = ev => {
+    const m = JSON.parse(ev.data);
+    if (m.t === 'hello') S.dry = !!m.dry_run;
+    else if (m.t === 'layout') { S.order = m.sections.flatMap(s => s.controls); S.groups = m.sections.map(s => s.controls.length); }
+    else if (m.t === 'state') S.states[m.id] = m;
+    else if (m.t === 'ack' && (!m.ok || m.message)) {
+      S.ack = m.message || 'Failed'; S.ackOk = m.ok;
+      clearTimeout(S.ackT); S.ackT = setTimeout(() => { S.ack = null; render(); }, 2500);
+    }
+    // First time we know enough, start at Home. While asleep, Home follows the house.
+    if (!S.placed && S.order.length && S.order.every(id => S.states[id])) { S.sel = homeIndex(); S.placed = true; }
+    else if (S.asleep) S.sel = homeIndex();
+    render();
+  };
+}
+const send = m => ws && ws.readyState === 1 && ws.send(JSON.stringify({ ...m, seq: ++seq }));
+const cur = () => S.states[S.order[S.sel]];
+const value = st => (Date.now() - (S.lastTurn[st.id] || 0) < 1500 && S.local[st.id] != null) ? S.local[st.id] : st.value;
+const turning = st => Date.now() - (S.lastTurn[st.id] || 0) < 1500;
+const colorOf = st => !st || !st.available ? null
+  : st.kind === 'climate' ? (st.mode === 'heat' ? COL.heat : st.mode === 'cool' ? COL.cool : null)
+  : st.kind === 'light' ? (st.on ? COL.light : null) : (st.on ? COL.cover : null);
+const saveable = st => st.kind === 'climate' && st.adjustable && (st.actions || []).includes('save_default') && Math.abs(value(st)) > 0.01;
+
+// ───────────────────────── Home: the only automatic behaviour ─────────────────────────
+function isDark() {
+  if (S.clock !== 'real') return S.clock === 'night';
+  const h = new Date().getHours();
+  return h >= DARK_FROM || h < DARK_UNTIL;
+}
+function firstOf(id, kind) {
+  let i = S.order.indexOf(id);
+  if (i < 0) i = S.order.findIndex(k => S.states[k]?.kind === kind);
+  return i;
+}
+function homeIndex() {
+  if (S.policy === 'stay') return S.sel;
+  const clim = firstOf(HOME_CLIMATE, 'climate'), lamp = firstOf(HOME_LIGHT, 'light');
+  if (S.policy === 'indoors' || lamp < 0) return clim < 0 ? 0 : clim;
+  const lampOn = !!S.states[S.order[lamp]]?.on;
+  return (lampOn || isDark()) ? lamp : (clim < 0 ? 0 : clim);
+}
+function homeWhy() {
+  if (S.policy === 'stay') return 'stays where it was left';
+  const i = homeIndex(), name = S.states[S.order[i]]?.name || '…';
+  if (S.policy === 'indoors') return `${name}, always`;
+  const lamp = firstOf(HOME_LIGHT, 'light');
+  if (i === lamp) return `${name}, because ${S.states[S.order[lamp]]?.on ? 'that light is on' : 'it is dark'}`;
+  return `${name}, because it is daytime and the light is off`;
+}
+function use() { const was = S.asleep; S.asleep = false; S.lastUse = Date.now(); return was; }
+function sleep() { S.asleep = true; S.sel = homeIndex(); S.arm.n = 0; render(); }
+setInterval(() => {
+  if (!S.asleep && !S.press && Date.now() - S.lastUse > IDLE_MS) sleep();
+  else if (S.asleep) { const h = homeIndex(); if (h !== S.sel) { S.sel = h; render(); } }
+  homeLine();
+}, 500);
+
+// ───────────────────────── geometry: the whole hit-test ─────────────────────────
+function zoneAt(kind, x, y) {
+  const dx = x - CX, dy = y - CY, r2 = dx * dx + dy * dy;
+  if (r2 > R * R) return Z.NONE;
+  const hub = r2 < HUB * HUB;
+  if (kind === 'climate') return hub ? Z.HUB : dy < 0 ? (dx < 0 ? Z.HEAT : Z.COOL) : Z.OFF;
+  if (kind === 'light')   return (hub || dy < 0) ? Z.TOGGLE : (dx < 0 ? Z.PREV : Z.NEXT);
+  if (kind === 'cover')   return dy < -BAND ? Z.UP : dy > BAND ? Z.DOWN : Z.NONE;
+  return Z.NONE;
+}
+
+// ───────────────────────── the four inputs ─────────────────────────
+function onTurn(dir) {
+  S.ringDeg += dir * 12; ringEl.style.transform = `rotate(${S.ringDeg}deg)`;
+  const now = Date.now();
+  if (use()) { S.guardUntil = now + WAKE_GUARD_MS; return render(); }   // first twist only wakes
+  if (now < S.guardUntil) return;
+  const st = cur(); if (!st || !st.available) return;
+  if (st.kind === 'cover') {
+    const a = S.arm;
+    if (a.id === st.id && a.dir === dir && now - a.t < COVER_WINDOW_MS) a.n++; else { a.id = st.id; a.dir = dir; a.n = 1; }
+    a.t = now;
+    if (a.n >= COVER_DETENTS) { a.n = 0; send({ t:'adjust', id:st.id, value: dir > 0 ? 100 : 0 }); }
+    else setTimeout(render, COVER_WINDOW_MS + 30);
+    return render();
+  }
+  if (!st.adjustable) { if (st.kind === 'climate') hint('tap Heat or Cool'); return; }
+  const step = st.step || 1;
+  let v = value(st) + dir * step;
+  v = Math.min(st.max, Math.max(st.min, Math.round(v / step) * step));
+  S.local[st.id] = v; S.lastTurn[st.id] = now;
+  send({ t:'adjust', id:st.id, value:v });
+  setTimeout(render, 1600);
+  render();
+}
+
+function onTap(x, y) {
+  const st = cur(); if (!st || !st.available) return;
+  const z = zoneAt(st.kind, x, y);
+  if (z === Z.HEAT || z === Z.COOL || z === Z.OFF) {
+    const m = z === Z.HEAT ? 'heat' : z === Z.COOL ? 'cool' : 'off';
+    if (st.mode !== m) send({ t:'mode', id:st.id, mode:m });
+  }
+  else if (z === Z.HUB) { if (saveable(st)) hint('hold to save'); }
+  else if (z === Z.TOGGLE) send({ t:'toggle', id:st.id });
+  else if (z === Z.PREV || z === Z.NEXT) {
+    const n = (st.modes || []).length; if (!n) return;
+    const i = st.modes.indexOf(st.mode), d = z === Z.NEXT ? 1 : -1;
+    send({ t:'mode', id:st.id, mode: st.modes[i < 0 ? (d > 0 ? 0 : n - 1) : (i + d + n) % n] });
+  }
+  else if (z === Z.UP) send({ t:'adjust', id:st.id, value:100 });
+  else if (z === Z.DOWN) send({ t:'adjust', id:st.id, value:0 });
+}
+
+function onHold(x, y) {
+  const st = cur(); if (!st || !st.available) return;
+  if (zoneAt(st.kind, x, y) === Z.HUB && saveable(st)) { send({ t:'action', id:st.id, name:'save_default' }); hint('saving'); }
+}
+
+function onSwipe(dir) {              // 'L' 'R' 'U' 'D' = the way the finger moved
+  const st = cur(), n = S.order.length; if (!n) return;
+  if (dir === 'L' || dir === 'R') {
+    const d = dir === 'L' ? 1 : -1;
+    S.sel = (S.sel + d + n) % n; S.arm.n = 0; S.hint = null; S.ack = null;
+    render(); slide(d);
+  } else if (st && st.available && st.kind === 'cover') {
+    send({ t:'adjust', id:st.id, value: dir === 'U' ? 100 : 0 });
+  }
+}
+
+function hint(text) { S.hint = text; clearTimeout(S.hintT); S.hintT = setTimeout(() => { S.hint = null; render(); }, 1600); render(); }
+
+// ───────────────────────── mouse → the gestures the firmware detects ─────────────────────────
+const knobEl = document.getElementById('knob'), cardEl = document.getElementById('card'),
+      chromeEl = document.getElementById('chrome'), ringEl = document.getElementById('ring');
+const pos = e => { const b = knobEl.getBoundingClientRect(); return [(e.clientX - b.left) * 360 / b.width, (e.clientY - b.top) * 360 / b.height]; };
+
+knobEl.addEventListener('pointerdown', e => {
+  const [x, y] = pos(e);
+  if (Math.hypot(x - CX, y - CY) > R) return;        // the corners do not exist
+  knobEl.setPointerCapture(e.pointerId);
+  use();
+  const p = S.press = { x, y, t0: Date.now(), moved:false, done:false };
+  p.timer = setTimeout(() => { if (S.press === p && !p.moved && !p.done) { p.done = true; onHold(x, y); render(); } }, HOLD_MS);
+  render();
+});
+knobEl.addEventListener('pointermove', e => {
+  const p = S.press; if (!p || p.done) return;
+  const [x, y] = pos(e), dx = x - p.x, dy = y - p.y;
+  if (!p.moved && Math.hypot(dx, dy) > TAP_SLOP) { p.moved = true; clearTimeout(p.timer); render(); }
+  if (Math.max(Math.abs(dx), Math.abs(dy)) >= SWIPE_PX) {
+    p.done = true;
+    onSwipe(Math.abs(dx) >= Math.abs(dy) ? (dx < 0 ? 'L' : 'R') : (dy < 0 ? 'U' : 'D'));
+  }
+});
+function release(cancelled) {
+  const p = S.press; if (!p) return;
+  clearTimeout(p.timer); S.press = null; S.lastUse = Date.now();
+  if (!cancelled && !p.done && !p.moved) onTap(p.x, p.y);
+  render();
+}
+knobEl.addEventListener('pointerup', () => release(false));
+knobEl.addEventListener('pointercancel', () => release(true));
+document.getElementById('stage').addEventListener('wheel', e => { e.preventDefault(); onTurn(e.deltaY > 0 ? 1 : -1); }, { passive:false });
+document.addEventListener('keydown', e => {
+  if (e.target.closest && e.target.closest('button')) return;
+  if (e.key === 'ArrowUp') onTurn(1); else if (e.key === 'ArrowDown') onTurn(-1);
+  else if (e.key === 'ArrowLeft') { use(); onSwipe('R'); } else if (e.key === 'ArrowRight') { use(); onSwipe('L'); }
+  else return;
+  e.preventDefault();
+});
+
+// ───────────────────────── drawing ─────────────────────────
+const esc = s => String(s ?? '').replace(/[&<>]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;' }[c]));
+const fit = (s, n) => { s = String(s ?? ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
+const pt = (a, r) => { const t = (a - 90) * Math.PI / 180; return [CX + r * Math.cos(t), CY + r * Math.sin(t)]; };
+const f1 = n => n.toFixed(1);
+function arc(r, a0, a1) {
+  const [x0, y0] = pt(a0, r), [x1, y1] = pt(a1, r);
+  return `M${f1(x0)},${f1(y0)} A${r},${r} 0 ${a1 - a0 > 180 ? 1 : 0} 1 ${f1(x1)},${f1(y1)}`;
+}
+function sector(a0, a1, rIn) {       // annular sector, angles clockwise from 12 o'clock
+  a0 += 0.6; a1 -= 0.6;
+  const big = a1 - a0 > 180 ? 1 : 0, [ox0, oy0] = pt(a0, R), [ox1, oy1] = pt(a1, R), [ix0, iy0] = pt(a0, rIn), [ix1, iy1] = pt(a1, rIn);
+  return `M${f1(ox0)},${f1(oy0)} A${R},${R} 0 ${big} 1 ${f1(ox1)},${f1(oy1)} L${f1(ix1)},${f1(iy1)} A${rIn},${rIn} 0 ${big} 0 ${f1(ix0)},${f1(iy0)} Z`;
+}
+const CAP_UP = `M1.6,${CY - BAND} A${R},${R} 0 0 1 358.4,${CY - BAND} Z`;
+const CAP_DOWN = `M1.6,${CY + BAND} A${R},${R} 0 0 0 358.4,${CY + BAND} Z`;
+const SHAPE = {
+  [Z.HEAT]: sector(270, 360, HUB + 2), [Z.COOL]: sector(0, 90, HUB + 2), [Z.OFF]: sector(90, 270, HUB + 2),
+  [Z.TOGGLE]: sector(270, 450, HUB) + ` M${CX - HUB},${CY} a${HUB},${HUB} 0 1 0 ${HUB * 2},0 a${HUB},${HUB} 0 1 0 ${-HUB * 2},0 Z`,
+  [Z.PREV]: sector(180, 270, HUB + 2), [Z.NEXT]: sector(90, 180, HUB + 2),
+  [Z.UP]: CAP_UP, [Z.DOWN]: CAP_DOWN,
+};
+let gid = 0;
+function glow(shape, color, alpha) {   // light pooled against the rim inside one zone
+  const id = 'g' + (++gid);
+  return `<defs><radialGradient id="${id}" gradientUnits="userSpaceOnUse" cx="${CX}" cy="${CY}" r="${R}">
+    <stop offset=".42" stop-color="${color}" stop-opacity="0"/><stop offset="1" stop-color="${color}" stop-opacity="${alpha}"/></radialGradient></defs>
+    <path d="${shape}" fill="url(#${id})"/>`;
+}
+const text = (cls, x, y, s, fill) => `<text class="${cls}" x="${x}" y="${y}" fill="${fill}">${esc(s)}</text>`;
+const isDigits = s => /^[\d.,+\-–−°%\s]+$/.test(s);
+const big = (y, s, fill) => text(isDigits(s) ? 't-num' : 't-name', CX, y, fit(s, isDigits(s) ? 6 : 13), fill);
+const chevron = (x, y, w, h, color, sw) => `<polyline points="${x - w},${y + h} ${x},${y - h} ${x + w},${y + h}" fill="none" stroke="${color}" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round"/>`;
+const sideChevron = (x, y, d, color) => `<polyline points="${x - 9 * d},${y - 18} ${x + 9 * d},${y} ${x - 9 * d},${y + 18}" fill="none" stroke="${color}" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>`;
+const signed = (v, step) => (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v).toFixed(step < 1 ? 1 : 0) + '°';
+
+function drawClimate(st) {
+  const c = colorOf(st), v = value(st), tn = turning(st);
+  let h = '';
+  if (st.mode === 'heat') h += glow(SHAPE[Z.HEAT], COL.heat, .5);
+  if (st.mode === 'cool') h += glow(SHAPE[Z.COOL], COL.cool, .5);
+  // gauge: bipolar from 12 o'clock
+  h += `<path d="${arc(173, -148, 148)}" stroke="${COL.track}" stroke-width="6" fill="none" stroke-linecap="round"/>`;
+  if (st.adjustable) {
+    const a = v / (st.max || 5) * 148;
+    if (Math.abs(a) > 0.5) h += `<path d="${arc(173, Math.min(0, a), Math.max(0, a))}" stroke="${c}" stroke-width="6" fill="none" stroke-linecap="round"/>`;
+    h += `<line x1="${CX}" y1="2" x2="${CX}" y2="14" stroke="${COL.ink}" stroke-width="3" stroke-linecap="round"/>`;
+  }
+  h += text('t-name', CX, 50, fit(st.name, 11), COL.ink);
+  h += text('t-lab', 80, 128, 'Heat', st.mode === 'heat' ? COL.heat : COL.dim);
+  h += text('t-lab', 280, 128, 'Cool', st.mode === 'cool' ? COL.cool : COL.dim);
+  h += text('t-lab', CX, 282, 'Off', st.mode === 'off' ? COL.ink : COL.dim);
+  // hub: room temperature; the nudge while turning
+  h += big(166, tn ? signed(v, st.step) : (st.primary || '–'), tn && c ? c : COL.ink);
+  const sv = saveable(st), holding = S.press && !S.press.moved && zoneAt('climate', S.press.x, S.press.y) === Z.HUB && sv;
+  if (S.hint) h += text('t-lab', CX, 210, S.hint, COL.warn);
+  else if (!tn && Math.abs(v) > 0.01 && st.adjustable) h += text('t-lab', CX, 210, signed(v, st.step), c);
+  if (sv && !S.hint) h += text('t-lab', CX, 236, 'hold to save', COL.dim);
+  if (sv) h += `<circle cx="${CX}" cy="${CY}" r="${HUB}" fill="none" stroke="${c}" stroke-opacity=".45" stroke-width="2" stroke-dasharray="3 9"/>`;
+  if (holding) h += `<circle class="hold" cx="${CX}" cy="${CY}" r="${HUB}" fill="none" stroke="${c}" stroke-width="5" transform="rotate(-90 ${CX} ${CY})"
+                       style="animation-delay:-${S.press.done ? HOLD_MS : Math.min(HOLD_MS, Date.now() - S.press.t0)}ms"/>`;
+  return h;
+}
+
+function drawLight(st) {
+  const v = value(st), tn = turning(st), lit = st.on || tn;
+  let h = '';
+  if (lit) h += glow(SHAPE[Z.TOGGLE], COL.light, (0.14 + 0.4 * Math.max(0, Math.min(100, v)) / 100).toFixed(2));
+  if (st.adjustable) {
+    h += `<path d="${arc(173, -148, 148)}" stroke="${COL.track}" stroke-width="6" fill="none" stroke-linecap="round"/>`;
+    const f = Math.max(0, Math.min(1, (v - st.min) / ((st.max - st.min) || 100)));
+    if (lit && f > 0.004) h += `<path d="${arc(173, -148, -148 + 296 * f)}" stroke="${COL.light}" stroke-width="6" fill="none" stroke-linecap="round"/>`;
+  }
+  h += text('t-name', CX, 50, fit(st.name, 11), COL.ink);
+  h += big(172, tn ? Math.round(v) + '%' : (st.primary || (st.on ? 'On' : 'Off')), lit ? COL.ink : COL.dim);
+  if ((st.modes || []).length) {
+    h += sideChevron(58, 252, -1, COL.dim) + sideChevron(302, 252, 1, COL.dim);
+    h += text('t-lab', CX, 280, fit(st.mode || 'Scene', 15), st.mode ? COL.light : COL.dim);
+  }
+  return h;
+}
+
+function drawCover(st) {
+  const a = S.arm, armed = a.id === st.id && Date.now() - a.t < COVER_WINDOW_MS ? a.n : 0;
+  const upLit = st.on ? 3 : (a.dir > 0 ? armed : 0), downLit = !st.on ? 3 : (a.dir < 0 ? armed : 0);
+  let h = '';
+  h += st.on ? glow(CAP_UP, COL.cover, .42) : glow(CAP_DOWN, COL.cover, .16);
+  h += text('t-name', CX, 50, fit(st.name, 11), COL.ink);
+  for (let i = 0; i < 3; i++) {       // chevrons light from the hub outwards, the way the cover travels
+    h += chevron(CX, 128 - i * 19, 24, 7, i < upLit ? COL.cover : COL.faint, 5);
+    h += `<g transform="rotate(180 ${CX} ${232 + i * 19})">${chevron(CX, 232 + i * 19, 24, 7, i < downLit ? (st.on ? COL.cover : COL.ink) : COL.faint, 5)}</g>`;
+  }
+  h += text('t-name', CX, CY, fit(st.secondary || st.primary || (st.on ? 'Open' : 'Closed'), 13), COL.ink);
+  return h;
+}
+
+function pressShape(st) {
+  const p = S.press; if (!p || p.moved || !st || !st.available) return '';
+  const z = zoneAt(st.kind, p.x, p.y);
+  if (z === Z.HUB) return '';
+  if ((z === Z.PREV || z === Z.NEXT) && !(st.modes || []).length) return '';
+  return SHAPE[z] ? `<path d="${SHAPE[z]}" fill="#fff" fill-opacity=".11" fill-rule="nonzero"/>` : '';
+}
+
+function dotAngles() {
+  const p = []; let q = 0;
+  (S.groups.length ? S.groups : [S.order.length]).forEach(n => { for (let i = 0; i < n; i++) { p.push(q); q += 1; } q += 0.6; });
+  const mid = (p[0] + p[p.length - 1]) / 2;
+  return p.map(v => 180 - (v - mid) * 5.6);      // left to right along the bottom rim
+}
+
+function render() {
+  gid = 0;
+  knobEl.classList.toggle('asleep', S.asleep);
+  const modeEl = document.getElementById('mode');
+  modeEl.textContent = S.dry == null ? 'CONNECTING' : S.dry ? 'DRY RUN' : 'LIVE';
+  modeEl.className = S.dry == null ? '' : S.dry ? 'dry' : 'live';
+  document.getElementById('link').textContent = !S.conn ? 'Bridge not reachable, retrying'
+    : S.dry == null ? '' : S.dry ? 'Reads the real house, changes nothing.' : 'Commands change the house.';
+  if (!S.conn || !S.order.length) {
+    cardEl.innerHTML = text('t-lab', CX, CY, 'Connecting to bridge', COL.dim); chromeEl.innerHTML = ''; return;
+  }
+  const st = cur();
+  let h = '';
+  if (!st) h = text('t-lab', CX, CY, 'Waiting for state', COL.dim);
+  else if (!st.available) h = text('t-name', CX, 50, fit(st.name, 11), COL.ink) + text('t-lab', CX, CY, 'Unavailable', COL.dim);
+  else h = pressShape(st) + (st.kind === 'climate' ? drawClimate(st) : st.kind === 'light' ? drawLight(st) : drawCover(st));
+  cardEl.innerHTML = h;
+
+  // chrome: position dots (indicator only) and one message line
+  let c = '';
+  const ang = dotAngles();
+  S.order.forEach((id, i) => {
+    const [x, y] = pt(ang[i], 168), on = colorOf(S.states[id]);
+    c += i === S.sel ? `<circle cx="${f1(x)}" cy="${f1(y)}" r="5.5" fill="${COL.ink}"/>`
+                     : `<circle cx="${f1(x)}" cy="${f1(y)}" r="3.5" fill="${on || COL.faint}"/>`;
+  });
+  const msg = S.ack ?? st?.warning;
+  if (msg) c += text('t-lab', CX, 314, fit(msg, 22), S.ack && S.ackOk ? COL.ink : COL.warn);
+  chromeEl.innerHTML = c;
+  homeLine();
+}
+
+function slide(d) {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches || !cardEl.animate) return;
+  cardEl.animate([{ transform:`translateX(${d * 64}px)`, opacity:0 }, { transform:'none', opacity:1 }],
+                 { duration:260, easing:'cubic-bezier(.16,1,.3,1)' });
+}
+
+// ───────────────────────── test rig (outside the device) ─────────────────────────
+function homeLine() {
+  const left = Math.max(0, Math.ceil((IDLE_MS - (Date.now() - S.lastUse)) / 1000));
+  document.getElementById('homeline').textContent = !S.order.length ? ''
+    : `${S.asleep ? 'Asleep.' : `Awake, sleeps in ${left} s.`} Home is ${homeWhy()}.`;
+}
+function seg(id, key) {
+  const box = document.getElementById(id);
+  const paint = () => box.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', b.dataset.v === S[key]));
+  box.addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; S[key] = b.dataset.v; paint(); if (S.asleep) S.sel = homeIndex(); render(); });
+  paint();
+}
+seg('segPolicy', 'policy'); seg('segClock', 'clock');
+document.getElementById('sleepNow').addEventListener('click', () => { S.lastUse = 0; sleep(); });
+
+connect(); render();
+</script>
+</body>
+</html>

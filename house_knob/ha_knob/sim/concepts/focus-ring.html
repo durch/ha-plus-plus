@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>House Knob Sim</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,1,0">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lato&family=Montserrat:wght@400&family=Noto+Sans&display=swap">
+<style>
+  :root { --bg:#0b0b0c; --fg:#eee; --dim:#8a8a8a; --track:#232326; --heat:#ff8a50; --cool:#4fc3f7; --light:#ffd54f; --cover:#9ccc65; --warn:#ffb300; --off:#555; }
+  body { margin:0; min-height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center;
+         gap:16px; background:#222; color:var(--fg); font-family:system-ui,sans-serif; }
+  /* Zone-based layout, one screen: the rim (r > 112) is 8 wedges that select a control;
+     the centre disc shows it, and its lower half is 2-3 big button columns.
+     Hit-testing is by geometry only (radius, angle, column), the same maths the firmware uses. */
+  #knob { width:360px; height:360px; border-radius:50%; background:var(--bg); position:relative; overflow:hidden;
+          box-shadow:0 0 0 14px #333, 0 0 0 16px #555; user-select:none; cursor:pointer; outline:none; font-family:'Lato',sans-serif; }
+  svg { position:absolute; inset:0; }
+  .rim { position:absolute; width:44px; height:44px; margin:-22px 0 0 -22px; display:flex; align-items:center; justify-content:center;
+         font-family:'Material Symbols Rounded'; font-size:30px; color:var(--off); pointer-events:none; }
+  .rim.on { color:var(--c); } .rim.sel { font-size:36px; }
+  .centre { position:absolute; left:68px; top:68px; width:224px; height:224px; border-radius:50%; pointer-events:none; text-align:center; }
+  .name { margin-top:26px; font-size:19px; color:var(--dim); }
+  .primary { font-family:'Montserrat',sans-serif; font-size:44px; line-height:1.1; }
+  .secondary { font-size:17px; color:var(--dim); min-height:22px; }
+  .btns { position:absolute; left:0; right:0; top:128px; height:96px; display:flex; }
+  .btn { flex:1; display:flex; align-items:flex-start; justify-content:center; padding-top:16px; font-family:'Noto Sans',sans-serif; font-size:19px; color:var(--dim);
+         border-top:1px solid var(--track); border-left:1px solid var(--track); }
+  .btn:first-child { border-left:none; }
+  .btn.on { color:#000; background:var(--c); }
+  .btn.save { color:var(--warn); }
+  .note { position:absolute; left:0; right:0; top:96px; text-align:center; font-size:13px; color:var(--warn); pointer-events:none; }
+  .help { font-size:13px; color:#999; max-width:480px; text-align:center; line-height:1.5; }
+  kbd { background:#333; border-radius:3px; padding:0 4px; }
+</style>
+</head>
+<body>
+<div id="knob" tabindex="0"></div>
+<div id="mode" class="help" style="font-weight:600"></div>
+<div class="help"><kbd>wheel</kbd> / <kbd>↑↓</kbd> turns the knob: it moves the focus round the ring. Click the centre to take hold of the focused control; then the knob adjusts it and the buttons appear. Click its icon to let go (or wait 10 s). Clicking any rim icon jumps straight into it.</div>
+<script>
+const el = document.getElementById('knob');
+const ICON = { indoors:'home', outdoors:'deck', 'light.terasa':'light', 'light.ambiance':'auto_awesome', 'light.reflektor':'highlight',
+               windows:'window', blinds:'blinds', shutters:'roller_shades' };
+const IDLE_MS = 10000;   // engaged controls fall back to the ring after this long untouched
+const S = { engaged:false, lastUse:0, conn:false, order:[], states:{}, sel:0, local:{}, lastTurn:{}, ack:null, ackOk:true };
+let ws, seq = 0;
+
+function connect() {
+  ws = new WebSocket(`ws://${location.host}/knob/ws?knob_id=sim&fw=sim`);
+  ws.onopen = () => { S.conn = true; render(); };
+  ws.onclose = () => { S.conn = false; render(); setTimeout(connect, 1500); };
+  ws.onmessage = ev => {
+    const m = JSON.parse(ev.data);
+    if (m.t === 'hello') { const d = document.getElementById('mode'); d.textContent = m.dry_run ? 'DRY RUN: nothing is sent to Home Assistant' : 'LIVE: changes your house'; d.style.color = m.dry_run ? '#8bc34a' : '#ff7043'; }
+    else if (m.t === 'layout') S.order = m.sections.flatMap(s => s.controls);
+    else if (m.t === 'state') S.states[m.id] = m;
+    else if (m.t === 'ack' && (!m.ok || m.message)) { S.ack = m.message || 'Failed'; S.ackOk = m.ok; setTimeout(() => { S.ack = null; render(); }, 2500); }
+    render();
+  };
+}
+const send = m => ws && ws.readyState === 1 && ws.send(JSON.stringify({ ...m, seq: ++seq }));
+const cur = () => S.states[S.order[S.sel]];
+const value = st => (Date.now() - (S.lastTurn[st.id] || 0) < 1500 && S.local[st.id] != null) ? S.local[st.id] : st.value;
+const color = st => !st || !st.on ? 'var(--off)' : st.kind === 'climate' ? (st.mode === 'cool' ? 'var(--cool)' : 'var(--heat)') : st.kind === 'light' ? 'var(--light)' : 'var(--cover)';
+
+// What the centre's lower half offers for a control: 2-3 big columns.
+function buttons(st) {
+  if (st.kind === 'climate') {
+    const b = ['off', 'heat', 'cool'].map(m => ({ label: m[0].toUpperCase() + m.slice(1), on: st.mode === m, act: () => send({ t:'mode', id:st.id, mode:m }) }));
+    if (st.mode === 'heat' && st.actions?.length && Math.abs(st.value) > 0.01) b[0] = { label:'Save', save:true, act: () => send({ t:'action', id:st.id, name:'save_default' }) };
+    return b;
+  }
+  if (st.kind === 'cover') return [
+    { label:'Down', on: !st.on, act: () => send({ t:'adjust', id:st.id, value:0 }) },
+    { label:'Up', on: st.on, act: () => send({ t:'adjust', id:st.id, value:100 }) } ];
+  const step = d => () => { const n = st.modes.length, i = st.modes.indexOf(st.mode); send({ t:'mode', id:st.id, mode: st.modes[i < 0 ? (d > 0 ? 0 : n - 1) : (i + d + n) % n] }); };
+  return [ { label:'‹', act: step(-1) }, { label: st.on ? 'Off' : 'On', on: st.on, act: () => send({ t:'toggle', id:st.id }) }, { label:'›', act: step(1) } ];
+}
+
+function use() { S.lastUse = Date.now(); }
+setInterval(() => { if (S.engaged && Date.now() - S.lastUse > IDLE_MS) { S.engaged = false; render(); } }, 500);
+
+function turn(dir) {
+  // Ring mode: the knob moves the focus round the rim. Engaged: it adjusts the control.
+  if (!S.engaged) { S.sel = (S.sel + dir + S.order.length) % S.order.length; return render(); }
+  use();
+  const st = cur(); if (!st || !st.adjustable) return;
+  if (st.kind === 'cover') { send({ t:'adjust', id:st.id, value: dir > 0 ? 100 : 0 }); return; }
+  let v = value(st) + dir * st.step;
+  v = Math.min(st.max, Math.max(st.min, Math.round(v / st.step) * st.step));
+  S.local[st.id] = v; S.lastTurn[st.id] = Date.now();
+  send({ t:'adjust', id:st.id, value:v }); render();
+}
+
+function touch(x, y) {           // x, y in screen pixels, origin top-left; identical maths on the device
+  const dx = x - 180, dy = y - 180, r = Math.hypot(dx, dy);
+  if (r > 112) {                 // rim: 8 wedges, the first centred at 12 o'clock
+    const a = (Math.atan2(dx, -dy) * 180 / Math.PI + 360 + 22.5) % 360;
+    const i = Math.floor(a / 45);
+    if (i >= S.order.length) return;
+    // Tap the focused icon again to let go; tap another to jump straight into it.
+    if (S.engaged && i === S.sel) S.engaged = false; else { S.sel = i; S.engaged = true; use(); }
+    return render();
+  }
+  if (!S.engaged) { S.engaged = true; use(); return render(); }   // tap the centre to take hold of it
+  use();
+  const st = cur(); if (!st || !st.available) return;
+  if (y < 196) { if (st.kind === 'light') send({ t:'toggle', id:st.id }); return; }   // upper centre
+  const b = buttons(st);
+  b[Math.min(b.length - 1, Math.floor((x - 68) / (224 / b.length)))].act();
+}
+
+el.addEventListener('wheel', e => { e.preventDefault(); turn(e.deltaY > 0 ? 1 : -1); }, { passive:false });
+el.addEventListener('click', e => { const b = el.getBoundingClientRect(); touch(e.clientX - b.left, e.clientY - b.top); });
+document.addEventListener('keydown', e => { if (e.key === 'ArrowUp') turn(1); else if (e.key === 'ArrowDown') turn(-1); else return; e.preventDefault(); });
+
+const esc = s => String(s ?? '').replace(/[&<>]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;' }[c]));
+function arcPath(r, a0, a1) {
+  const pt = a => { const t = (a - 90) * Math.PI / 180; return [180 + r * Math.cos(t), 180 + r * Math.sin(t)]; };
+  const [x0, y0] = pt(a0), [x1, y1] = pt(a1);
+  return `M${x0},${y0} A${r},${r} 0 ${a1 - a0 > 180 ? 1 : 0} 1 ${x1},${y1}`;
+}
+
+function render() {
+  if (!S.conn || !S.order.length) { el.innerHTML = `<div class="centre"><div class="name" style="margin-top:96px">Connecting to bridge…</div></div>`; return; }
+  const st = cur();
+  let h = '<svg viewBox="0 0 360 360">';
+  h += `<path d="${arcPath(146, S.sel * 45 - 21, S.sel * 45 + 21)}" stroke="${S.engaged ? '#2a2a2f' : '#1d1d20'}" stroke-width="64" fill="none"/>`;   // focused wedge
+  if (S.engaged && st && st.adjustable && st.kind !== 'cover') {
+    const f = Math.max(0.002, Math.min(1, (value(st) - st.min) / (st.max - st.min)));
+    h += `<path d="${arcPath(116, 0.5, 359.5)}" stroke="var(--track)" stroke-width="5" fill="none"/>`;
+    h += `<path d="${arcPath(116, 0.5, 0.5 + 359 * f)}" stroke="${color(st)}" stroke-width="5" fill="none" stroke-linecap="round"/>`;
+  }
+  h += '</svg>';
+  S.order.forEach((id, i) => {
+    const s = S.states[id], t = (i * 45 - 90) * Math.PI / 180;
+    h += `<div class="rim ${s?.on ? 'on' : ''} ${i === S.sel ? 'sel' : ''}" style="left:${180 + 146 * Math.cos(t)}px;top:${180 + 146 * Math.sin(t)}px;--c:${color(s)}">${ICON[id] || 'circle'}</div>`;
+  });
+  if (st) {
+    const turning = Date.now() - (S.lastTurn[st.id] || 0) < 1500, v = value(st);
+    const primary = !st.available ? 'Unavailable' : turning ? (st.unit === '°C' ? (v > 0 ? '+' : '') + v.toFixed(1) + '°' : Math.round(v) + '%') : st.primary;
+    h += `<div class="centre" style="--c:${color(st)}"><div class="name">${esc(st.name)}</div>
+      <div class="primary" style="${primary.length > 7 ? 'font-size:26px;line-height:1.9' : ''}">${esc(primary)}</div>
+      <div class="secondary">${esc(S.ack ?? st.warning ?? st.secondary)}</div>
+      ${S.engaged ? `<div class="btns">${buttons(st).map(b => `<div class="btn ${b.on ? 'on' : ''} ${b.save ? 'save' : ''}">${esc(b.label)}</div>`).join('')}</div>`
+                  : `<div class="btns"><div class="btn" style="color:#555">tap to adjust</div></div>`}</div>`;
+    if (turning) setTimeout(render, 1600);
+  }
+  el.innerHTML = h;
+}
+connect(); render(); el.focus();
+</script>
+</body>
+</html>
