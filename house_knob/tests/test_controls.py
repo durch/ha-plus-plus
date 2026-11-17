@@ -229,3 +229,23 @@ async def test_outdoors_heat_is_absolute(layout):
     rec = Rec()
     await out.adjust(s, 22, rec)
     assert rec.calls == [("climate", "set_temperature", {"entity_id": "climate.wonderwall_art_smart_2", "temperature": 22.0})]
+
+
+async def test_light_taps_are_debounced(layout, monkeypatch):
+    import asyncio
+
+    import ha_knob.controls as c
+    monkeypatch.setattr(c, "TOGGLE_SETTLE_S", 0.05)
+    light = layout.controls["light.terasa"]
+    s = {"light.terasa": st("off", supported_color_modes=["color_temp"])}
+    rec = Rec()
+    await light.toggle(s, rec)
+    assert light.state(s)["on"] is True and rec.calls == []      # shown at once, not sent yet
+    await light.toggle(s, rec)
+    await light.toggle(s, rec)                                    # three taps = on
+    await asyncio.sleep(0.15)
+    assert rec.calls == [("light", "turn_on", {"entity_id": "light.terasa"})]
+    rec = Rec()
+    await light.toggle(s, rec)                                    # still off in HA: on -> wanted off -> nothing to do
+    await asyncio.sleep(0.15)
+    assert rec.calls == []

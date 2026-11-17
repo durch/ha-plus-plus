@@ -18,6 +18,7 @@ Call = Callable[[str, str, dict], Awaitable[Any]]
 States = dict[str, dict]
 
 OFFSET_RANGE = 5.0     # how far the knob can nudge a climate group, °C
+TOGGLE_SETTLE_S = 0.6  # light taps: switch once tapping stops
 MODE_SETTLE_S = 1.5    # taps cycle modes; devices switch once tapping stops
 
 UNAVAILABLE = {"unavailable", "unknown", None}
@@ -385,6 +386,8 @@ class LightControl(Control):
     hue_group: str | None = None   # discover every Hue scene of this room (see discover())
     kind: str = "light"
     active_scene: str | None = None
+    pending: tuple[bool, float] | None = None   # (wanted on/off, monotonic deadline)
+    _settle: Any = None
 
     @property
     def id(self) -> str:  # type: ignore[override]
@@ -416,9 +419,19 @@ class LightControl(Control):
     def entities(self) -> set[str]:  # scenes are watched too
         return {self.entity, *self.scenes.values()}
 
+    def shown_on(self, states: States) -> bool:
+        """On/off to display: a just-tapped state wins until the lamps catch up."""
+        actual = (states.get(self.entity) or {}).get("state") == "on"
+        if self.pending:
+            want, deadline = self.pending
+            if actual == want or time.monotonic() > deadline:
+                self.pending = None
+            else:
+                return want
+        return actual
+
     def state(self, states: States) -> dict:
-        s = states.get(self.entity) or {}
-        on = s.get("state") == "on"
+        on = self.shown_on(states)
         bri = _attr(states, self.entity, "brightness")
         pct = round(bri / 255 * 100) if (on and isinstance(bri, (int, float))) else (100 if on else 0)
         dimmable = self._dimmable(states)
@@ -455,7 +468,19 @@ class LightControl(Control):
             await call("light", "turn_on", {"entity_id": self.entity, "brightness_pct": pct})
 
     async def toggle(self, states: States, call: Call) -> None:
-        await call("light", "toggle", {"entity_id": self.entity})
+        """Taps flip the wanted state at once on screen; the lamps are switched once the
+        tapping stops, so a burst of taps is one command (or none)."""
+        want = not self.shown_on(states)
+        self.pending = (want, time.monotonic() + TOGGLE_SETTLE_S + 5)
+        if self._settle:
+            self._settle.cancel()
+
+        async def settle():
+            await asyncio.sleep(TOGGLE_SETTLE_S)
+            if ((states.get(self.entity) or {}).get("state") == "on") != want:
+                await call("light", "turn_on" if want else "turn_off", {"entity_id": self.entity})
+
+        self._settle = asyncio.get_running_loop().create_task(settle())
 
 
 # ── Covers ──────────────────────────────────────────────────────────────────

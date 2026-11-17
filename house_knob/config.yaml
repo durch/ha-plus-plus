@@ -1,5 +1,5 @@
 name: House Knob bridge
-version: "0.2.3"
+version: "0.2.4"
 slug: house_knob
 description: Bridge between Home Assistant and the House Knob (ESP32-S3 rotary controller), hk/1 protocol
 url: https://github.com/durch/ha-plus-plus

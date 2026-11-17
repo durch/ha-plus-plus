@@ -147,11 +147,50 @@ class Bridge:
             raise web.HTTPNotFound()
         return web.FileResponse(self.firmware_dir / json.loads(meta.read_text())["file"])
 
+    async def _admin(self, request: web.Request) -> None:
+        """Admin endpoints change devices, so they need a valid Home Assistant token
+        (`Authorization: Bearer <long-lived token>`), checked against HA itself."""
+        auth = request.headers.get("Authorization", "")
+        core = os.environ.get("HA_CORE_URL", "http://homeassistant:8123")
+        try:
+            timeout = aiohttp.ClientTimeout(total=8)
+            async with (aiohttp.ClientSession(timeout=timeout) as session,
+                        session.get(f"{core}/api/", headers={"Authorization": auth}) as r):
+                ok = auth.startswith("Bearer ") and r.status == 200
+        except Exception:  # noqa: BLE001
+            ok = False
+        if not ok:
+            raise web.HTTPUnauthorized(text="admin endpoints need a Home Assistant token")
+
+    async def firmware_upload(self, request: web.Request) -> web.Response:
+        """PUT /admin/firmware?version=3.0.1 with the .bin as the body: stores it where
+        the knob's updater looks (/firmware/version, /firmware/download)."""
+        await self._admin(request)
+        version = request.query.get("version", "")
+        if not self.firmware_dir or not version.replace(".", "").isdigit():
+            return web.json_response({"ok": False, "error": "need ?version=x.y.z and a firmware dir"}, status=400)
+        data = await request.read()
+        if len(data) < 100_000 or data[0] != 0xE9:   # ESP image magic
+            return web.json_response({"ok": False, "error": "not an ESP firmware image"}, status=400)
+        self.firmware_dir.mkdir(parents=True, exist_ok=True)
+        (self.firmware_dir / "hiphi_dial.bin").write_bytes(data)
+        (self.firmware_dir / "version.json").write_text(
+            json.dumps({"version": version, "file": "hiphi_dial.bin", "size": len(data)}))
+        log.info("firmware %s stored (%d bytes)", version, len(data))
+        return web.json_response({"ok": True, "version": version, "size": len(data)})
+
+    async def ota(self, request: web.Request) -> web.Response:
+        """POST /admin/ota: ask every connected knob to check for and install an update."""
+        await self._admin(request)
+        await self._broadcast({"t": "ota"})
+        return web.json_response({"ok": True, "knobs": len(self.knobs)})
+
     async def adopt(self, request: web.Request) -> web.Response:
         """Point a knob at a bridge by writing its Bridge URL through the knob's own
         config page: POST /admin/adopt?knob=<ip>&bridge=http://<this bridge>:8765.
         For when the knob is reachable from the bridge's host but not from where you sit
         (client isolation on the IoT WiFi)."""
+        await self._admin(request)
         knob, bridge_url = request.query.get("knob", ""), request.query.get("bridge", "")
         try:
             if not ipaddress.ip_address(knob).is_private or not bridge_url.startswith("http://"):
@@ -174,12 +213,14 @@ class Bridge:
                                   "knobs": len(self.knobs), "controls": len(self.layout.controls)})
 
     def app(self) -> web.Application:
-        app = web.Application()
+        app = web.Application(client_max_size=4 * 1024 * 1024)   # room for a firmware image
         app.router.add_get("/knob/ws", self.ws_handler)
         app.router.add_get("/firmware/version", self.firmware_version)
         app.router.add_get("/firmware/download", self.firmware_download)
         app.router.add_get("/healthz", self.health)
         app.router.add_post("/admin/adopt", self.adopt)
+        app.router.add_put("/admin/firmware", self.firmware_upload)
+        app.router.add_post("/admin/ota", self.ota)
         # The simulator is the knob's real interaction model in a browser; the other
         # concepts explored on the way are kept beside it for reference.
         app.router.add_get("/", lambda r: web.HTTPFound("/sim/"))
