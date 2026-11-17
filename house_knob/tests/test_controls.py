@@ -218,7 +218,7 @@ SCHED = {"input_boolean.indoors_schedule": st("off"), "input_number.indoors_wake
 
 async def test_heat_turns_schedule_on_and_applies_set_point_plus_offset(layout, monkeypatch):
     house = layout.controls["indoors"]
-    monkeypatch.setattr(type(house), "_period", lambda self, states: "wake")
+    monkeypatch.setattr(type(house), "_period", lambda self, states, coming_home=False: "wake")
     s = house_states(**SCHED)
     rec = Rec()
     await house.set_mode(s, "heat", rec)
@@ -286,3 +286,18 @@ async def test_house_mode_applies_once_the_knob_is_still(layout, monkeypatch):
     await house.set_mode(s, "home", rec)
     await asyncio.sleep(0.15)
     assert rec.calls == [("input_select", "select_option", {"entity_id": "input_select.house_mode", "option": "Home"})]
+
+
+async def test_heat_on_while_away_brings_the_house_home_first(layout, monkeypatch):
+    house = layout.controls["indoors"]
+    monkeypatch.setattr("ha_knob.controls._dt", type("D", (), {"datetime": type("N", (), {"now": staticmethod(lambda: type("T", (), {"hour": 12})())}), "date": __import__("datetime").date}))
+    s = house_states(**{**SCHED, "input_select.house_mode": st("Away")})
+    rec = Rec()
+    await house.set_mode(s, "heat", rec)
+    assert rec.calls[0] == ("input_select", "select_option", {"entity_id": "input_select.house_mode", "option": "Home"})
+    temps = {c[2]["entity_id"]: c[2]["temperature"] for c in rec.calls if c[1] == "set_temperature"}
+    assert temps["climate.dnevni"] == 25.0      # the wake value, not the away one
+    rec = Rec()
+    s["input_select.house_mode"] = st("Home")
+    await house.set_mode(s, "cool", rec)
+    assert not any(c[0] == "input_select" for c in rec.calls)   # already home: nothing to say

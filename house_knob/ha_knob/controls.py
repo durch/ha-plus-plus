@@ -140,6 +140,7 @@ class ClimateControl(Control):
     # {switch, wake, sleep, away, offsets: {climate entity: input_number}}
     schedule: dict = field(default_factory=dict)
     house_mode: str = "input_select.house_mode"
+    home_option: str | None = None   # set: turning heat or cool on also puts the house in Home
     # Exact (unrounded) per-device setpoints, so 0.5° knob steps accumulate on
     # devices that only take whole degrees.
     exact: dict[str, float] = field(default_factory=dict)
@@ -262,8 +263,8 @@ class ClimateControl(Control):
             return set()
         return {self.house_mode, sc["switch"], sc["wake"], sc["sleep"], sc["away"], *sc["offsets"].values()}
 
-    def _period(self, states: States) -> str:
-        if (states.get(self.house_mode) or {}).get("state") == "Away":
+    def _period(self, states: States, coming_home: bool = False) -> str:
+        if not coming_home and (states.get(self.house_mode) or {}).get("state") == "Away":
             return "away"
         return "wake" if 6 <= _dt.datetime.now().hour < 23 else "sleep"
 
@@ -344,10 +345,18 @@ class ClimateControl(Control):
             for group in (self.heat, self.cool):
                 await self._off(states, group, call)
             return
+        # Heating or cooling means someone is home: keep the house mode in step, so the
+        # Home / Away automations never work against the knob.
+        coming_home = False
+        if self.home_option and (states.get(self.house_mode) or {}).get("state") != self.home_option:
+            await call("input_select", "select_option",
+                       {"entity_id": self.house_mode, "option": self.home_option})
+            coming_home = True
         other = self._group("cool" if mode == "heat" else "heat")
         await self._off(states, other, call)
         await self._schedule_on(states, mode == "heat", call)
-        base = self._num(states, self.schedule[self._period(states)]) if (self.schedule and mode == "heat") else None
+        base = (self._num(states, self.schedule[self._period(states, coming_home)])
+                if (self.schedule and mode == "heat") else None)
         for m in self._group(mode).members:
             if not _live(states, m.entity):
                 continue
@@ -720,6 +729,9 @@ def build(config: dict) -> Layout:
         sections.append({"id": "windows", "name": "Windows", "icon": "window", "controls": ids})
 
     if hm := config.get("house_mode"):
+        for c in controls.values():
+            if isinstance(c, ClimateControl):
+                c.house_mode, c.home_option = hm["entity"], hm.get("home", "Home")
         ctl = HouseModeControl(hm["entity"], hm.get("home", "Home"), hm.get("away", "Away"))
         controls[ctl.id] = ctl
         sections.append({"id": "house", "name": "House", "icon": "home", "controls": [ctl.id]})
