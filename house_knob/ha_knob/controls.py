@@ -328,18 +328,19 @@ class ClimateControl(Control):
         for m in self._group(mode).members:
             if not _avail(states, m.entity):
                 continue
+            # Switch on explicitly: some integrations (the Tuya heaters) take the
+            # temperature from set_temperature but ignore its hvac_mode.
+            if states[m.entity].get("state") != m.hvac_mode:
+                await call("climate", "set_hvac_mode", {"entity_id": m.entity, "hvac_mode": m.hvac_mode})
             offset_helper = self.schedule.get("offsets", {}).get(m.entity) if base is not None else None
+            target = None
             if offset_helper:
                 # Entering Heat: straight to the schedule's value for this time of day.
                 target = base + self._num(states, offset_helper, 0.0)
-                await call("climate", "set_temperature",
-                           {"entity_id": m.entity, "temperature": target, "hvac_mode": m.hvac_mode})
             elif self._group(mode).absolute:
-                await call("climate", "set_temperature",
-                           {"entity_id": m.entity, "temperature": self._abs_target(states, mode),
-                            "hvac_mode": m.hvac_mode})
-            elif states[m.entity].get("state") != m.hvac_mode:
-                await call("climate", "set_hvac_mode", {"entity_id": m.entity, "hvac_mode": m.hvac_mode})
+                target = self._abs_target(states, mode)
+            if target is not None:
+                await call("climate", "set_temperature", {"entity_id": m.entity, "temperature": target})
         if mode == "heat" and self.schedule:
             self.targets.pop("heat", None)   # fresh from the schedule: no nudge yet
             if self.store:

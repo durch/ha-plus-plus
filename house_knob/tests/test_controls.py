@@ -66,7 +66,10 @@ async def test_switch_to_cool_skips_unavailable(layout):
     assert rec.calls[0][2] == {"entity_id": ["climate.dnevni"], "hvac_mode": "off"}
     cool = [c for c in rec.calls[1:] if c[0] == "climate"]
     assert {c[2]["entity_id"] for c in cool} == {"climate.9424b844f92c", "climate.9424b82c5fa0"}
-    assert all(c[1] == "set_temperature" and c[2]["hvac_mode"] == "cool" for c in cool)
+    # each AC is switched on explicitly, then given the target (some devices ignore
+    # hvac_mode inside set_temperature)
+    assert [c[1] for c in cool if c[2]["entity_id"] == "climate.9424b844f92c"] == ["set_hvac_mode", "set_temperature"]
+    assert all(c[2].get("hvac_mode", "cool") == "cool" for c in cool)
 
 
 async def test_lockstep_adjust_keeps_relative_offsets(layout):
