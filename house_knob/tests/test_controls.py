@@ -42,7 +42,7 @@ def layout():
 
 
 def test_layout_sections(layout):
-    assert [s["id"] for s in layout.sections] == ["climate", "lights", "windows"]
+    assert [s["id"] for s in layout.sections] == ["climate", "lights", "windows", "house"]
     assert "indoors" in layout.controls and "outdoors" in layout.controls
 
 
@@ -269,3 +269,20 @@ async def test_light_taps_are_debounced(layout, monkeypatch):
     await light.toggle(s, rec)                                    # still off in HA: on -> wanted off -> nothing to do
     await asyncio.sleep(0.15)
     assert rec.calls == []
+
+
+async def test_house_mode_applies_once_the_knob_is_still(layout, monkeypatch):
+    import asyncio
+
+    import ha_knob.controls as c
+    monkeypatch.setattr(c, "MODE_SETTLE_S", 0.05)
+    house = layout.controls["house_mode"]
+    s = {"input_select.house_mode": st("Away")}
+    assert house.state(s)["primary"] == "Away" and house.state(s)["kind"] == "house"
+    rec = Rec()
+    await house.set_mode(s, "home", rec)
+    assert house.state(s)["on"] is True and rec.calls == []
+    await house.set_mode(s, "away", rec)
+    await house.set_mode(s, "home", rec)
+    await asyncio.sleep(0.15)
+    assert rec.calls == [("input_select", "select_option", {"entity_id": "input_select.house_mode", "option": "Home"})]

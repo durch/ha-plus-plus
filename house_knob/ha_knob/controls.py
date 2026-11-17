@@ -587,6 +587,72 @@ class CoverControl(Control):
         await call("cover", service, {"entity_id": ids})
 
 
+# ── House mode ──────────────────────────────────────────────────────────────
+
+
+@dataclass
+class HouseModeControl(Control):
+    """Home / Away (an input_select the house's own automations key off). It has no
+    wedge on the knob: resting on the idle centre and turning sets it."""
+
+    entity: str
+    home: str = "Home"
+    away: str = "Away"
+    id: str = "house_mode"
+    name: str = "House"
+    icon: str = "home"
+    kind: str = "house"
+    pending: tuple[bool, float] | None = None
+    _settle: Any = None
+
+    def entities(self) -> set[str]:
+        return {self.entity}
+
+    def shown_home(self, states: States) -> bool:
+        actual = (states.get(self.entity) or {}).get("state") == self.home
+        if self.pending:
+            want, deadline = self.pending
+            if actual == want or time.monotonic() > deadline:
+                self.pending = None
+            else:
+                return want
+        return actual
+
+    def state(self, states: States) -> dict:
+        home = self.shown_home(states)
+        return {"t": "state", "id": self.id, "kind": self.kind, "name": self.name, "icon": self.icon,
+                "available": _avail(states, self.entity), "on": home,
+                "mode": "home" if home else "away", "modes": ["away", "home"],
+                "value": 0, "min": 0, "max": 1, "step": 1, "unit": "", "adjustable": False,
+                "primary": self.home if home else self.away, "secondary": "", "warning": None}
+
+    def _want(self, states: States, want: bool, call: Call) -> None:
+        """Changing house mode moves the whole heating schedule: apply it once the
+        knob has been still for a moment, so passing through a state does nothing."""
+        self.pending = (want, time.monotonic() + MODE_SETTLE_S + 8)
+        if self._settle:
+            self._settle.cancel()
+
+        async def settle():
+            await asyncio.sleep(MODE_SETTLE_S)
+            if ((states.get(self.entity) or {}).get("state") == self.home) != want:
+                await call("input_select", "select_option",
+                           {"entity_id": self.entity, "option": self.home if want else self.away})
+
+        self._settle = asyncio.get_running_loop().create_task(settle())
+
+    async def set_mode(self, states: States, mode: str, call: Call) -> None:
+        if mode not in ("home", "away"):
+            raise ValueError(f"unknown house mode {mode!r}")
+        self._want(states, mode == "home", call)
+
+    async def toggle(self, states: States, call: Call) -> None:
+        self._want(states, not self.shown_home(states), call)
+
+    async def adjust(self, states: States, value: float, call: Call) -> None:
+        return None
+
+
 # ── Config loading ──────────────────────────────────────────────────────────
 
 
@@ -652,5 +718,10 @@ def build(config: dict) -> Layout:
         ids.append(ctl.id)
     if ids:
         sections.append({"id": "windows", "name": "Windows", "icon": "window", "controls": ids})
+
+    if hm := config.get("house_mode"):
+        ctl = HouseModeControl(hm["entity"], hm.get("home", "Home"), hm.get("away", "Away"))
+        controls[ctl.id] = ctl
+        sections.append({"id": "house", "name": "House", "icon": "home", "controls": [ctl.id]})
 
     return Layout(controls, sections)

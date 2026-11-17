@@ -5,6 +5,11 @@ listen:
   host: 0.0.0.0
   port: 8765
 
+house_mode:                  # rest a finger on the idle centre and turn: clockwise = home
+  entity: input_select.house_mode
+  home: Home
+  away: Away
+
 climate:
   - id: indoors
     name: Indoors

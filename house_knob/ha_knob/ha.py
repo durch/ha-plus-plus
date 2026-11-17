@@ -157,6 +157,8 @@ class HAClient:
                     s["state"] = "off"
                 elif service == "turn_on" and s["state"] == "off":
                     s["state"] = "unknown"
+            elif domain == "input_select":
+                s["state"] = data.get("option", s["state"])
             elif domain == "input_boolean":
                 s["state"] = "on" if service == "turn_on" else "off"
             elif domain == "input_number":
