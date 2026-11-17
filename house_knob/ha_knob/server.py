@@ -25,8 +25,10 @@ DEBOUNCE_S = 0.35
 
 
 class Bridge:
-    def __init__(self, layout: Layout, ha_url: str, token: str, firmware_dir: Path | None = None):
+    def __init__(self, layout: Layout, ha_url: str, token: str, firmware_dir: Path | None = None,
+                 settings: dict | None = None):
         self.layout = layout
+        self.settings = settings or {}   # knob-side settings sent in hello (screen rotation)
         self.firmware_dir = firmware_dir
         self.knobs: set[web.WebSocketResponse] = set()
         watch = set().union(*(c.entities() for c in layout.controls.values()))
@@ -115,7 +117,8 @@ class Bridge:
         knob = request.query.get("knob_id", "?")
         log.info("knob %s connected (fw %s) from %s", knob, request.query.get("fw"), request.remote)
         await ws.send_json({"t": "hello", "proto": 1, "bridge": __version__,
-                            "ha": self.ha.connected.is_set(), "dry_run": self.ha.dry_run})
+                            "ha": self.ha.connected.is_set(), "dry_run": self.ha.dry_run,
+                            "settings": self.settings})
         await ws.send_json(self.layout_msg)
         for cid in self.layout.controls:
             await ws.send_json(self._state(cid))
@@ -234,7 +237,8 @@ def main() -> None:
     layout = build(config)
     attach_store(layout, Path(args.state))
     bridge = Bridge(layout, ha_url, token,
-                    Path(args.firmware_dir) if args.firmware_dir else None)
+                    Path(args.firmware_dir) if args.firmware_dir else None,
+                    config.get("knob", {}))
     bridge.ha.dry_run = args.dry_run
     if args.fake:
         bridge.ha.load_fake(json.loads(Path(args.fake).read_text()))
