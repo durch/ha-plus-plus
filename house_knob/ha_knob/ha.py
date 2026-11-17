@@ -153,6 +153,14 @@ class HAClient:
                     s["state"] = data["hvac_mode"]
                 if "temperature" in data:
                     a["temperature"] = data["temperature"]
+                if service == "turn_off":
+                    s["state"] = "off"
+                elif service == "turn_on" and s["state"] == "off":
+                    s["state"] = "unknown"
+            elif domain == "input_boolean":
+                s["state"] = "on" if service == "turn_on" else "off"
+            elif domain == "input_number":
+                s["state"] = str(data.get("value"))
             elif domain == "cover":
                 pos = {"open_cover": 100, "close_cover": 0}.get(service, data.get("position"))
                 if pos is not None:

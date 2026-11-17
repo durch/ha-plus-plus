@@ -46,42 +46,53 @@ def test_layout_sections(layout):
     assert "indoors" in layout.controls and "outdoors" in layout.controls
 
 
-async def test_set_mode_heat_keeps_setpoints_and_turns_cool_off(layout):
-    house = layout.controls["indoors"]
-    states = house_states(**{"climate.9424b844f92c": st("cool", temperature=24, current_temperature=24)})
-    assert house.current_mode(states) == "cool"
-    rec = Rec()
-    await house.set_mode(states, "heat", rec)
-    assert rec.calls[0] == ("climate", "set_hvac_mode", {"entity_id": ["climate.9424b844f92c"], "hvac_mode": "off"})
-    on = [c for c in rec.calls[1:] if c[0] == "climate"]
-    assert {c[2]["entity_id"] for c in on} == {"climate.dnevni", "climate.dnevni_2", "climate.hodnik"}
-    assert all(c[1] == "set_hvac_mode" and c[2]["hvac_mode"] == "heat" for c in on)
+ON = {"input_boolean.indoors_schedule": st("on")}
+OFF = {"input_boolean.indoors_schedule": st("off")}
 
 
-async def test_switch_to_cool_skips_unavailable(layout):
+def test_floors_report_no_mode_so_the_schedule_switch_decides(layout):
     house = layout.controls["indoors"]
-    states = house_states(**{"climate.dnevni": st("heat", temperature=21.0, current_temperature=19.0)})
+    assert house.current_mode(house_states(**OFF)) == "off"     # floors always read "off" in HA
+    assert house.current_mode(house_states(**ON)) == "heat"
+    cooling = house_states(**ON, **{"climate.9424b844f92c": st("cool", temperature=24)})
+    assert house.current_mode(cooling) == "cool"
+
+
+async def test_heat_to_cool_parks_floors_and_starts_acs(layout):
+    house = layout.controls["indoors"]
+    house.targets.clear()
     rec = Rec()
-    await house.set_mode(states, "cool", rec)
-    assert rec.calls[0][2] == {"entity_id": ["climate.dnevni"], "hvac_mode": "off"}
-    cool = [c for c in rec.calls[1:] if c[0] == "climate"]
-    assert {c[2]["entity_id"] for c in cool} == {"climate.9424b844f92c", "climate.9424b82c5fa0"}
-    # each AC is switched on explicitly, then given the target (some devices ignore
-    # hvac_mode inside set_temperature)
-    assert [c[1] for c in cool if c[2]["entity_id"] == "climate.9424b844f92c"] == ["set_hvac_mode", "set_temperature"]
-    assert all(c[2].get("hvac_mode", "cool") == "cool" for c in cool)
+    await house.set_mode(house_states(**ON), "cool", rec)
+    assert ("input_boolean", "turn_off", {"entity_id": "input_boolean.indoors_schedule"}) in rec.calls
+    parked = {c[2]["entity_id"]: c[2]["temperature"] for c in rec.calls
+              if c[1] == "set_temperature" and c[2]["entity_id"].startswith("climate.d") or c[2]["entity_id"] == "climate.hodnik" and c[1] == "set_temperature"}
+    assert parked == {"climate.dnevni": 7.0, "climate.dnevni_2": 7.0, "climate.hodnik": 7.0}
+    acs = [c for c in rec.calls if c[0] == "climate" and c[2]["entity_id"] in ("climate.9424b844f92c", "climate.9424b82c5fa0")]
+    # each available AC is switched on explicitly, then given the target; Klinci is unavailable
+    assert [c[1] for c in acs if c[2]["entity_id"] == "climate.9424b844f92c"] == ["set_hvac_mode", "set_temperature"]
+    assert not any(c[2].get("entity_id") == "climate.9424b82e9242" for c in rec.calls if c[0] == "climate")
+
+
+async def test_off_parks_floors_and_turns_acs_off(layout):
+    house = layout.controls["indoors"]
+    s = house_states(**ON, **{"climate.9424b844f92c": st("cool", temperature=24)})
+    rec = Rec()
+    await house.set_mode(s, "off", rec)
+    assert rec.calls[0] == ("input_boolean", "turn_off", {"entity_id": "input_boolean.indoors_schedule"})
+    assert ("climate", "turn_off", {"entity_id": ["climate.9424b844f92c"]}) in rec.calls
+    assert ("climate", "set_temperature", {"entity_id": "climate.hodnik", "temperature": 7.0}) in rec.calls
 
 
 async def test_lockstep_adjust_keeps_relative_offsets(layout):
     house = layout.controls["indoors"]
-    states = house_states(**{
-        "climate.dnevni": st("heat", temperature=26.5, current_temperature=19.0, target_temp_step=0.5),
-        "climate.dnevni_2": st("heat", temperature=24.0, current_temperature=20.0, target_temp_step=0.5),
-        "climate.hodnik": st("heat", temperature=20.0, current_temperature=18.0, target_temp_step=0.5),
+    house.targets.clear()
+    states = house_states(**ON, **{
+        "climate.dnevni": st("off", temperature=26.5, target_temp_step=0.5),
+        "climate.dnevni_2": st("off", temperature=24.0, target_temp_step=0.5),
+        "climate.hodnik": st("off", temperature=20.0, target_temp_step=0.5),
     })
-    v = house.state(states)["value"]  # desired room temp (sensor offline -> 21.0)
     rec = Rec()
-    await house.adjust(states, v + 1.0, rec)
+    await house.adjust(states, 1.0, rec)
     assert {c[2]["entity_id"]: c[2]["temperature"] for c in rec.calls} == {
         "climate.dnevni": 27.5, "climate.dnevni_2": 25.0, "climate.hodnik": 21.0}
 
@@ -105,16 +116,26 @@ async def test_cool_is_absolute_whole_degrees(layout):
 def test_window_warning_only_while_heating(layout):
     house = layout.controls["indoors"]
     open_win = st("open", current_position=100)
-    s = house_states(**{"cover.velux_window_roof_window": open_win})
-    assert house.state(s)["warning"] is None  # off
-    s["climate.dnevni"] = st("heat", temperature=21.0, current_temperature=19.0)
-    assert house.state(s)["warning"] == "1 window open"
+    assert house.state(house_states(**OFF, **{"cover.velux_window_roof_window": open_win}))["warning"] is None
+    assert house.state(house_states(**ON, **{"cover.velux_window_roof_window": open_win}))["warning"] == "1 window open"
 
 
-def test_terrace_wonderwall_uses_heat_cool(layout):
-    terrace = layout.controls["outdoors"]
-    s = {"climate.wonderwall_art_smart_2": st("heat_cool", temperature=26, current_temperature=15)}
-    assert terrace.current_mode(s) == "heat"
+async def test_wonderwalls_count_as_on_while_unknown_and_get_turned_off(layout):
+    out = layout.controls["outdoors"]
+    s = {"climate.heater": st("off", temperature=26.0),
+         "climate.wonderwall_art_smart": st("unknown", temperature=26.0),
+         "climate.wonderwall_art_smart_2": st("unknown", temperature=26.0),
+         "climate.580d0d34e617": st("off", temperature=27)}
+    assert out.current_mode(s) == "heat"
+    rec = Rec()
+    await out.set_mode(s, "off", rec)
+    assert ("climate", "turn_off", {"entity_id": ["climate.wonderwall_art_smart", "climate.wonderwall_art_smart_2"]}) in rec.calls
+    rec = Rec()
+    s["climate.wonderwall_art_smart"] = st("off", temperature=26.0)
+    s["climate.wonderwall_art_smart_2"] = st("off", temperature=26.0)
+    await out.set_mode(s, "heat", rec)
+    assert ("climate", "turn_on", {"entity_id": "climate.wonderwall_art_smart"}) in rec.calls
+    assert ("climate", "set_hvac_mode", {"entity_id": "climate.heater", "hvac_mode": "heat"}) in rec.calls
 
 
 async def test_light_group_presets(layout):
@@ -161,38 +182,36 @@ async def test_cover_groups_up_down(layout):
 def test_indoors_shows_room_sensor_and_relative_offset(layout):
     house = layout.controls["indoors"]
     house.targets.clear()
-    s = house_states(**{"sensor.oxymoron_temperature": st("21.3"),
-                        "climate.dnevni": st("heat", temperature=26.5, current_temperature=19.0)})
+    s = house_states(**ON, **{"sensor.oxymoron_temperature": st("21.3")})
     out = house.state(s)
-    assert out["primary"] == "21.3°" and out["value"] == 0 and (out["min"], out["max"]) == (-5, 5)
+    assert out["mode"] == "heat" and out["primary"] == "21.3°" and out["value"] == 0 and (out["min"], out["max"]) == (-5, 5)
     house.targets["heat"] = 1.0
-    assert house.state(s)["value"] == 1.0 and house.state(s)["secondary"] == ""
+    assert house.state(s)["value"] == 1.0
     s["sensor.oxymoron_temperature"] = st("unavailable")
     assert house.state(s)["primary"] == "–"
-    s["climate.dnevni"] = st("off", temperature=26.5)
-    out = house.state(s)
-    assert out["mode"] == "off" and out["adjustable"] is False
+    off = house.state(house_states(**OFF))
+    assert off["mode"] == "off" and off["adjustable"] is False
 
 
 async def test_tap_cycles_modes_and_only_applies_after_settling(layout, monkeypatch):
+    import asyncio
+
     import ha_knob.controls as c
     monkeypatch.setattr(c, "MODE_SETTLE_S", 0.05)
     house = layout.controls["indoors"]
-    s = house_states(**{"climate.dnevni": st("heat", temperature=26.5)})
+    s = house_states(**ON)
     rec = Rec()
     await house.toggle(s, rec)          # heat -> cool (pending)
     assert house.state(s)["mode"] == "cool" and rec.calls == []
     await house.toggle(s, rec)          # cool -> off, before cool was ever applied
     assert house.state(s)["mode"] == "off"
-    import asyncio
     await asyncio.sleep(0.15)
     assert rec.calls[0] == ("input_boolean", "turn_off", {"entity_id": "input_boolean.indoors_schedule"})
-    assert [(x[1], x[2]["hvac_mode"]) for x in rec.calls if x[0] == "climate"] == [("set_hvac_mode", "off")]
-    assert not any(x[2].get("hvac_mode") == "cool" for x in rec.calls)
+    assert not any(x[2].get("hvac_mode") == "cool" for x in rec.calls)   # the ACs never started
 
 
 SCHED = {"input_boolean.indoors_schedule": st("off"), "input_number.indoors_wake": st("25.0"),
-         "input_number.indoors_sleep": st("20.0"), "input_number.indoors_away": st("18.0"),
+         "input_number.indoors_sleep": st("22.0"), "input_number.indoors_away": st("18.0"),
          "input_number.offset_dnevni": st("0.0"), "input_number.offset_dnevni_2": st("0.5"),
          "input_number.offset_hodnik": st("-1.0"), "input_select.house_mode": st("Home")}
 
@@ -204,16 +223,14 @@ async def test_heat_turns_schedule_on_and_applies_set_point_plus_offset(layout, 
     rec = Rec()
     await house.set_mode(s, "heat", rec)
     assert ("input_boolean", "turn_on", {"entity_id": "input_boolean.indoors_schedule"}) in rec.calls
-    temps = {c[2]["entity_id"]: c[2]["temperature"] for c in rec.calls if c[1] == "set_temperature"}
-    assert temps == {"climate.dnevni": 25.0, "climate.dnevni_2": 25.5, "climate.hodnik": 24.0}
-    rec = Rec()
-    await house.set_mode(s, "off", rec)
-    assert rec.calls[0] == ("input_boolean", "turn_off", {"entity_id": "input_boolean.indoors_schedule"})
+    assert {c[2]["entity_id"]: c[2]["temperature"] for c in rec.calls if c[1] == "set_temperature"} == {
+        "climate.dnevni": 25.0, "climate.dnevni_2": 25.5, "climate.hodnik": 24.0}
+    assert not any(c[1] == "set_hvac_mode" for c in rec.calls)   # the floors have no mode to set
 
 
 async def test_save_default_adds_nudge_to_every_offset(layout):
     house = layout.controls["indoors"]
-    s = house_states(**SCHED, **{"climate.dnevni": st("heat", temperature=26.0)})
+    s = house_states(**{**SCHED, **ON})
     house.targets["heat"] = 1.0
     rec = Rec()
     assert await house.action(s, "save_default", rec) == "Saved +1.0°"

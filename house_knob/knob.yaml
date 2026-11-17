@@ -29,10 +29,13 @@ climate:
       min: 15
       max: 28
       step: 0.5
+      off_temperature: 7     # floors when Indoors is Off or cooling
       entities:
-        - climate.dnevni
-        - climate.dnevni_2
-        - climate.hodnik
+        # Always-on floor thermostats: HA shows them "off" whatever they do, so they are
+        # driven by setpoint alone. "Off" parks them at off_temperature.
+        - {entity: climate.dnevni, setpoint_only: true}
+        - {entity: climate.dnevni_2, setpoint_only: true}
+        - {entity: climate.hodnik, setpoint_only: true}
     cool:
       min: 18
       max: 30
@@ -53,10 +56,12 @@ climate:
       step: 1
       entities:
         - climate.heater
-        - entity: climate.wonderwall_art_smart
+        - entity: climate.wonderwall_art_smart     # HA reports "unknown" while it runs
           hvac_mode: heat_cool
+          any_on: true
         - entity: climate.wonderwall_art_smart_2
           hvac_mode: heat_cool
+          any_on: true
     cool:
       min: 18
       max: 30

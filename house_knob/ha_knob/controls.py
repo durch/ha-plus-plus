@@ -80,6 +80,25 @@ class Control:
 class Member:
     entity: str
     hvac_mode: str
+    # Devices whose "on" state HA cannot name (it reports "unknown" while running):
+    # anything but off counts as on, and they are switched with turn_on / turn_off.
+    any_on: bool = False
+    # Thermostats that are always on and are driven by their setpoint alone (HA shows
+    # them as "off" whatever they do): heating = the schedule switch, off = a low setpoint.
+    setpoint_only: bool = False
+
+
+def _live(states: States, eid: str) -> bool:
+    """A climate device we can command. Unlike _avail, "unknown" counts."""
+    s = states.get(eid)
+    return bool(s) and s.get("state") not in ("unavailable", None)
+
+
+def _is_on(states: States, m: Member) -> bool:
+    state = (states.get(m.entity) or {}).get("state")
+    if m.any_on:
+        return state not in ("off", "unavailable", None)
+    return state == m.hvac_mode
 
 
 @dataclass
@@ -90,6 +109,7 @@ class ModeGroup:
     max: float
     step: float
     absolute: bool = False   # knob sets one target directly on every device (else: relative nudge)
+    off_temperature: float = 7.0   # where setpoint-only thermostats are parked when "off"
 
 
 @dataclass
@@ -133,11 +153,14 @@ class ClimateControl(Control):
         return self.heat if mode == "heat" else self.cool
 
     def current_mode(self, states: States) -> str:
-        for group in (self.heat, self.cool):
-            for m in group.members:
-                s = states.get(m.entity)
-                if s and s.get("state") == m.hvac_mode:
-                    return group.mode
+        for group in (self.cool, self.heat):
+            if any(_is_on(states, m) for m in group.members if not m.setpoint_only):
+                return group.mode
+        # Setpoint-only thermostats never report a mode: the schedule switch says
+        # whether the house is heating.
+        if (self.schedule and any(m.setpoint_only for m in self.heat.members)
+                and (states.get(self.schedule["switch"]) or {}).get("state") == "on"):
+            return "heat"
         return "off"
 
     def _default_mode(self) -> str:
@@ -150,7 +173,7 @@ class ClimateControl(Control):
         out = {}
         for m in group.members:
             t = _attr(states, m.entity, "temperature")
-            if _avail(states, m.entity) and isinstance(t, (int, float)):
+            if _live(states, m.entity) and isinstance(t, (int, float)):
                 out[m.entity] = float(t)
         return out
 
@@ -166,7 +189,7 @@ class ClimateControl(Control):
         if self.sensor:  # authoritative sensor only; device readings are differently calibrated
             return self._room_temp(states)
         temps = [_attr(states, m.entity, "current_temperature") for m in group.members
-                 if _avail(states, m.entity)]
+                 if _live(states, m.entity)]
         temps = [float(t) for t in temps if isinstance(t, (int, float))]
         return sum(temps) / len(temps) if temps else None
 
@@ -197,7 +220,7 @@ class ClimateControl(Control):
         now = self._current_temp(states, group)
         offset = self.targets.get(mode, 0.0) if mode != "off" else 0.0
         unavailable = [_friendly(states, m.entity) for m in group.members
-                       if not _avail(states, m.entity)]
+                       if not _live(states, m.entity)]
         warning = None
         if mode == "heat":
             open_ = [e for e in self.warn_if_open
@@ -286,7 +309,7 @@ class ClimateControl(Control):
             if self.store:
                 self.store()
             for m in group.members:
-                if _avail(states, m.entity) and _attr(states, m.entity, "temperature") != target:
+                if _live(states, m.entity) and _attr(states, m.entity, "temperature") != target:
                     await call("climate", "set_temperature", {"entity_id": m.entity, "temperature": target})
             return
         new = _snap(float(value), -OFFSET_RANGE, OFFSET_RANGE, group.step)
@@ -297,7 +320,7 @@ class ClimateControl(Control):
         if abs(delta) < 1e-6:
             return
         for m in group.members:
-            if not _avail(states, m.entity):
+            if not _live(states, m.entity):
                 continue
             cur = _attr(states, m.entity, "temperature")
             if not isinstance(cur, (int, float)):
@@ -326,11 +349,16 @@ class ClimateControl(Control):
         await self._schedule_on(states, mode == "heat", call)
         base = self._num(states, self.schedule[self._period(states)]) if (self.schedule and mode == "heat") else None
         for m in self._group(mode).members:
-            if not _avail(states, m.entity):
+            if not _live(states, m.entity):
                 continue
             # Switch on explicitly: some integrations (the Tuya heaters) take the
             # temperature from set_temperature but ignore its hvac_mode.
-            if states[m.entity].get("state") != m.hvac_mode:
+            if m.setpoint_only:
+                pass   # always on: the setpoint below is the whole command
+            elif m.any_on:
+                if not _is_on(states, m):
+                    await call("climate", "turn_on", {"entity_id": m.entity})
+            elif states[m.entity].get("state") != m.hvac_mode:
                 await call("climate", "set_hvac_mode", {"entity_id": m.entity, "hvac_mode": m.hvac_mode})
             offset_helper = self.schedule.get("offsets", {}).get(m.entity) if base is not None else None
             target = None
@@ -348,10 +376,15 @@ class ClimateControl(Control):
         self.last_mode = mode
 
     async def _off(self, states: States, group: ModeGroup, call: Call) -> None:
-        ids = [m.entity for m in group.members
-               if _avail(states, m.entity) and states[m.entity].get("state") != "off"]
+        ids = [m.entity for m in group.members if not m.setpoint_only
+               and _live(states, m.entity) and states[m.entity].get("state") != "off"]
         if ids:
-            await call("climate", "set_hvac_mode", {"entity_id": ids, "hvac_mode": "off"})
+            await call("climate", "turn_off", {"entity_id": ids})
+        for m in group.members:
+            if m.setpoint_only and _live(states, m.entity) and \
+                    _attr(states, m.entity, "temperature") != group.off_temperature:
+                await call("climate", "set_temperature",
+                           {"entity_id": m.entity, "temperature": group.off_temperature})
 
     async def toggle(self, states: States, call: Call) -> None:
         """Tap cycles Off -> Heat -> Cool -> Off. The devices are only switched once the
@@ -563,14 +596,16 @@ def _members(raw: list, default_mode: str) -> list[Member]:
         if isinstance(item, str):
             out.append(Member(item, default_mode))
         else:
-            out.append(Member(item["entity"], item.get("hvac_mode", default_mode)))
+            out.append(Member(item["entity"], item.get("hvac_mode", default_mode),
+                              bool(item.get("any_on")), bool(item.get("setpoint_only"))))
     return out
 
 
 def _group(raw: dict, mode: str) -> ModeGroup:
     return ModeGroup(mode, _members(raw["entities"], mode),
                      float(raw["min"]), float(raw["max"]), float(raw["step"]),
-                     bool(raw.get("absolute", mode == "cool")))   # cooling is always absolute
+                     bool(raw.get("absolute", mode == "cool")),   # cooling is always absolute
+                     float(raw.get("off_temperature", 7.0)))
 
 
 @dataclass
