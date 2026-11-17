@@ -66,7 +66,7 @@ async def test_heat_to_cool_parks_floors_and_starts_acs(layout):
     assert ("input_boolean", "turn_off", {"entity_id": "input_boolean.indoors_schedule"}) in rec.calls
     parked = {c[2]["entity_id"]: c[2]["temperature"] for c in rec.calls
               if c[1] == "set_temperature" and c[2]["entity_id"].startswith("climate.d") or c[2]["entity_id"] == "climate.hodnik" and c[1] == "set_temperature"}
-    assert parked == {"climate.dnevni": 7.0, "climate.dnevni_2": 7.0, "climate.hodnik": 7.0}
+    assert parked == {"climate.dnevni": 18.0, "climate.dnevni_2": 18.0, "climate.hodnik": 18.0}
     acs = [c for c in rec.calls if c[0] == "climate" and c[2]["entity_id"] in ("climate.9424b844f92c", "climate.9424b82c5fa0")]
     # each available AC is switched on explicitly, then given the target; Klinci is unavailable
     assert [c[1] for c in acs if c[2]["entity_id"] == "climate.9424b844f92c"] == ["set_hvac_mode", "set_temperature"]
@@ -80,7 +80,7 @@ async def test_off_parks_floors_and_turns_acs_off(layout):
     await house.set_mode(s, "off", rec)
     assert rec.calls[0] == ("input_boolean", "turn_off", {"entity_id": "input_boolean.indoors_schedule"})
     assert ("climate", "turn_off", {"entity_id": ["climate.9424b844f92c"]}) in rec.calls
-    assert ("climate", "set_temperature", {"entity_id": "climate.hodnik", "temperature": 7.0}) in rec.calls
+    assert ("climate", "set_temperature", {"entity_id": "climate.hodnik", "temperature": 18.0}) in rec.calls
 
 
 async def test_lockstep_adjust_keeps_relative_offsets(layout):
