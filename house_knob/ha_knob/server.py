@@ -5,11 +5,13 @@ from __future__ import annotations
 import argparse
 import asyncio
 import hashlib
+import ipaddress
 import json
 import logging
 import os
 from pathlib import Path
 
+import aiohttp
 import yaml
 from aiohttp import WSMsgType, web
 
@@ -142,6 +144,28 @@ class Bridge:
             raise web.HTTPNotFound()
         return web.FileResponse(self.firmware_dir / json.loads(meta.read_text())["file"])
 
+    async def adopt(self, request: web.Request) -> web.Response:
+        """Point a knob at a bridge by writing its Bridge URL through the knob's own
+        config page: POST /admin/adopt?knob=<ip>&bridge=http://<this bridge>:8765.
+        For when the knob is reachable from the bridge's host but not from where you sit
+        (client isolation on the IoT WiFi)."""
+        knob, bridge_url = request.query.get("knob", ""), request.query.get("bridge", "")
+        try:
+            if not ipaddress.ip_address(knob).is_private or not bridge_url.startswith("http://"):
+                raise ValueError
+        except ValueError:
+            return web.json_response({"ok": False, "error": "need knob=<private ip>&bridge=http://..."}, status=400)
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=8)) as session:
+                async with session.post(f"http://{knob}/config", data={"bridge": bridge_url}) as r:
+                    saved = r.status == 200
+                async with session.get(f"http://{knob}/") as r:
+                    page = await r.text()
+        except Exception as e:  # noqa: BLE001
+            return web.json_response({"ok": False, "error": f"knob not reachable: {e}"}, status=502)
+        log.info("adopt: knob %s -> %s (saved=%s)", knob, bridge_url, saved)
+        return web.json_response({"ok": saved, "knob_shows_bridge": bridge_url in page})
+
     async def health(self, request: web.Request) -> web.Response:
         return web.json_response({"ok": True, "ha": self.ha.connected.is_set(),
                                   "knobs": len(self.knobs), "controls": len(self.layout.controls)})
@@ -152,6 +176,7 @@ class Bridge:
         app.router.add_get("/firmware/version", self.firmware_version)
         app.router.add_get("/firmware/download", self.firmware_download)
         app.router.add_get("/healthz", self.health)
+        app.router.add_post("/admin/adopt", self.adopt)
         # The simulator is the knob's real interaction model in a browser; the other
         # concepts explored on the way are kept beside it for reference.
         app.router.add_get("/", lambda r: web.HTTPFound("/sim/"))
