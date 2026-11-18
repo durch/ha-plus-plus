@@ -278,11 +278,21 @@ function send(msg) {
     if (!data.ok && data.message) { note = data.message; draw(); }
   });
 }
+var retry = null;
 function poll() {
+  retry = null;
   request('GET', 'state?rev=' + encodeURIComponent(rev) + '&_=' + now(), null, function (data) {
     if (data) { apply(data); setTimeout(poll, 50); }
-    else { note = 'No connection to the house'; draw(); rev = ''; setTimeout(poll, 5000); }
+    else { note = 'No connection to the house'; draw(); rev = ''; retry = setTimeout(poll, 2000); }
   });
+}
+function wake() {       // the Kindle woke up or WiFi came back: do not sit out the retry wait
+  if (retry) { clearTimeout(retry); poll(); }
+}
+if (window.addEventListener) {
+  window.addEventListener('online', wake, false);
+  window.addEventListener('focus', wake, false);
+  document.addEventListener('visibilitychange', wake, false);
 }
 window.onresize = function () { draw(); };
 setInterval(function () {          // let expired taps fall back to the bridge's truth
