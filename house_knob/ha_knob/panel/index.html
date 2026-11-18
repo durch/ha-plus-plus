@@ -19,11 +19,11 @@ body { font-family: Helvetica, Arial, sans-serif; font-weight: bold;
        -webkit-text-size-adjust: none; }
 table { border-collapse: collapse; width: 100%; table-layout: fixed; }
 td { padding: 0; text-align: center; vertical-align: middle; overflow: hidden; }
-.row { border-bottom: 2px solid #000; }
-.gap { border-bottom: 6px solid #000; }
+.row { border-bottom: 1px solid #000; }
+.gap { border-bottom: 5px solid #000; }
 td.name { text-align: left; padding-left: 2%; }
 .small { font-weight: normal; }
-td.b { border-left: 2px solid #000; }
+td.dim { color: #888; font-weight: normal; }
 td.on { background: #000; color: #fff; }
 td.na { color: #999; }
 #scenes { display: none; }
@@ -78,26 +78,18 @@ function nameCell(w, c, sub) {
          '<div style="font-size:' + Math.round(22 * U) + 'px">' + esc(c.name) + '</div>' +
          '<div class="small" style="font-size:' + Math.round(19 * U) + 'px">' + (esc(sub) || '&nbsp;') + '</div></td>';
 }
-// One option of a selector. The current one is told apart three ways, because black
-// against white alone does not say which of two is "the one": a solid dot (the others
-// have a hollow ring), bold text, and the black fill.
-function seg(w, label, active, onclick, size, inline) {
-  var d = Math.round((inline ? 0.6 : 0.5) * (size || 24) * U), b = Math.max(2, Math.round(d / 6));
-  var dot = '<span style="display:inline-block;vertical-align:middle;width:' + d + 'px;height:' + d +
-            'px;border-radius:' + d + 'px;border:' + b + 'px solid ' + (active ? '#fff' : '#000') +
-            ';background:' + (active ? '#fff' : 'transparent') + '"></span>';
-  var text = '<span style="vertical-align:middle;font-weight:' + (active ? 'bold' : 'normal') + '">' + label + '</span>';
-  return cell(w, 'b' + (active ? ' on' : ''),
-              inline ? dot + '&nbsp;&nbsp;' + text : '<div style="line-height:1">' + dot + '</div><div>' + text + '</div>',
-              onclick, size);
+// One option of a selector: the current one is a black block in bold, the others are
+// plain grey text with no box, so the eye lands on what is on.
+function seg(w, label, active, onclick, size) {
+  return cell(w, active ? 'on' : 'dim', label, onclick, size);
 }
 function signed(v) { return (v > 0 ? '+' : '') + (Math.round(v * 10) / 10); }
 
 function rowHtml(i) {
   var c = view(controls[i]), h = '', sub;
   if (c.kind == 'house') {
-    h += seg(50, 'Home', c.mode == 'home', "mode(" + i + ",'home')", 30, 1);
-    h += seg(50, 'Away', c.mode == 'away', "mode(" + i + ",'away')", 30, 1);
+    h += seg(50, 'Home', c.mode == 'home', "mode(" + i + ",'home')", 30);
+    h += seg(50, 'Away', c.mode == 'away', "mode(" + i + ",'away')", 30);
   } else if (c.kind == 'climate') {
     var rel = c.min < 0;                     // relative group: value is a nudge
     var off = c.mode == 'off';
@@ -106,28 +98,28 @@ function rowHtml(i) {
     h += seg(12, 'Off', off, "mode(" + i + ",'off')", 21);
     h += seg(13, 'Heat', c.mode == 'heat', "mode(" + i + ",'heat')", 21);
     h += seg(13, 'Cool', c.mode == 'cool', "mode(" + i + ",'cool')", 21);
-    if (off) h += cell(38, 'b', '&nbsp;');
+    if (off) h += cell(38, '', '&nbsp;');
     else {
-      h += cell(12, 'b', '&minus;', 'step(' + i + ',-1)', 40);
-      h += cell(14, 'b', rel ? signed(c.value) + '&deg;' : Math.round(c.value) + '&deg;', '', 26);
-      h += cell(12, 'b', '+', 'step(' + i + ',1)', 40);
+      h += cell(12, '', '&minus;', 'step(' + i + ',-1)', 40);
+      h += cell(14, '', rel ? signed(c.value) + '&deg;' : Math.round(c.value) + '&deg;', '', 26);
+      h += cell(12, '', '+', 'step(' + i + ',1)', 40);
     }
   } else if (c.kind == 'light') {
     h += nameCell(24, c, c.on ? (c.mode || '') : '');
     h += seg(12, 'Off', !c.on, 'onoff(' + i + ',0)', 21);
     h += seg(13, 'On', c.on, 'onoff(' + i + ',1)', 21);
-    if (c.adjustable) {
-      h += cell(11, 'b', '&minus;', 'step(' + i + ',-2)', 40);
-      h += cell(13, 'b', c.on ? Math.round(c.value) + '%' : '&nbsp;', '', 22);
-      h += cell(11, 'b', '+', 'step(' + i + ',2)', 40);
-    } else h += cell(35, 'b', '&nbsp;');
-    h += (c.modes && c.modes.length) ? cell(16, 'b', 'Scene', 'openScenes(' + i + ')', 21) : cell(16, 'b', '&nbsp;');
+    if (c.adjustable && c.on) {
+      h += cell(11, '', '&minus;', 'step(' + i + ',-2)', 40);
+      h += cell(13, '', Math.round(c.value) + '%', '', 22);
+      h += cell(11, '', '+', 'step(' + i + ',2)', 40);
+    } else h += cell(35, '', '&nbsp;');
+    h += (c.modes && c.modes.length) ? cell(16, 'small', 'Scenes', 'openScenes(' + i + ')', 21) : cell(16, '', '&nbsp;');
   } else if (c.kind == 'cover') {
     var lab = c.labels || ['Closed', 'Open'];
     var moving = c.primary == 'Moving', mixed = c.primary == 'Mixed';
     h += nameCell(24, c, moving ? 'Moving' : (c.secondary || ''));
-    h += seg(38, esc(lab[0]), !c.on && !mixed, 'cover(' + i + ',0)', 24, 1);
-    h += seg(38, esc(lab[1]), c.on && !mixed, 'cover(' + i + ',100)', 24, 1);
+    h += seg(38, esc(lab[0]), !c.on && !mixed, 'cover(' + i + ',0)', 24);
+    h += seg(38, esc(lab[1]), c.on && !mixed, 'cover(' + i + ',100)', 24);
   }
   return h;
 }
@@ -196,7 +188,7 @@ function drawScenes() {
   var size = Math.round(Math.min(24, rh / U * 0.36) * U);
   html = '<table class="gap"><tr style="height:' + rh + 'px">' +
          '<td class="name" style="font-size:' + Math.round(26 * U) + 'px">' + esc(c.name) + '</td>' +
-         '<td class="b" onclick="closeScenes()" style="font-size:' + Math.round(24 * U) + 'px">Back</td></tr></table>';
+         '<td onclick="closeScenes()" style="font-size:' + Math.round(24 * U) + 'px">Back</td></tr></table>';
   for (k = 0; k < m.length; k += 2) {
     html += '<table class="row"><tr style="height:' + rh + 'px">';
     html += sceneCell(c, m, k, size) + sceneCell(c, m, k + 1, size) + '</tr></table>';
@@ -209,11 +201,10 @@ function drawScenes() {
   document.getElementById('scenes').style.display = 'block';
 }
 function sceneCell(c, m, k, size) {
-  if (k >= m.length) return '<td class="b">&nbsp;</td>';
+  if (k >= m.length) return '<td>&nbsp;</td>';
   var active = c.on && c.mode == m[k];
-  return '<td class="' + (k % 2 ? 'b' : '') + (active ? ' on' : '') +
-         '" onclick="scene(' + k + ')" style="font-size:' + size + 'px;font-weight:' + (active ? 'bold' : 'normal') + '">' +
-         esc(m[k]) + '</td>';
+  return '<td class="' + (active ? 'on' : '') + '" onclick="scene(' + k + ')" style="font-size:' + size +
+         'px;font-weight:' + (active ? 'bold' : 'normal') + '">' + esc(m[k]) + '</td>';
 }
 function scene(k) {
   var c = byId(sceneFor);
