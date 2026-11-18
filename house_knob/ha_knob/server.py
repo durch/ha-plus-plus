@@ -22,6 +22,18 @@ from .ha import HAClient
 log = logging.getLogger("bridge")
 ROOT = Path(__file__).resolve().parent
 DEBOUNCE_S = 0.35
+PANEL_WAIT_S = 25   # how long /panel/state holds a request when nothing has changed
+
+
+class _Reply:
+    """Stands in for a knob's WebSocket when a command arrives over HTTP: keeps the ack."""
+
+    def __init__(self) -> None:
+        self.ack: dict | None = None
+
+    async def send_json(self, msg: dict) -> None:
+        if msg.get("t") == "ack":
+            self.ack = msg
 
 
 class Bridge:
@@ -37,6 +49,7 @@ class Bridge:
             *(c.discover(states) for c in layout.controls.values() if hasattr(c, "discover")))
         self._pending_adjust: dict[str, float] = {}
         self._adjust_tasks: dict[str, asyncio.Task] = {}
+        self._changed = asyncio.Event()   # wakes panels waiting in /panel/state
         layout_json = json.dumps(layout.sections, sort_keys=True).encode()
         self.layout_msg = {"t": "layout", "rev": hashlib.sha1(layout_json).hexdigest()[:8],
                            "sections": layout.sections}
@@ -46,6 +59,8 @@ class Bridge:
         return self.layout.controls[cid].state(self.ha.states)
 
     async def _broadcast(self, msg: dict) -> None:
+        self._changed.set()
+        self._changed = asyncio.Event()
         for ws in list(self.knobs):
             try:
                 await ws.send_json(msg)
@@ -135,6 +150,53 @@ class Bridge:
             log.info("knob %s disconnected", knob)
         return ws
 
+    # ── panel (e-ink browsers: plain HTTP, no WebSocket) ──
+    def _panel_snapshot(self) -> dict:
+        controls = []
+        for cid, ctl in self.layout.controls.items():
+            state = self._state(cid)
+            if labels := getattr(ctl, "labels", None):   # covers: what the two ends are called
+                state["labels"] = list(labels)
+            controls.append(state)
+        rev = hashlib.sha1(json.dumps(controls, sort_keys=True).encode()).hexdigest()[:8]
+        return {"rev": rev, "ha": self.ha.connected.is_set(), "dry_run": self.ha.dry_run,
+                "controls": controls}
+
+    async def panel_state(self, request: web.Request) -> web.Response:
+        """GET /panel/state?rev=<last seen>: answers at once when the house differs from
+        `rev`, otherwise holds the request until it does (at most PANEL_WAIT_S)."""
+        seen = request.query.get("rev")
+        deadline = asyncio.get_running_loop().time() + PANEL_WAIT_S
+        while True:
+            changed = self._changed          # grab before reading state: no missed wake-up
+            snap = self._panel_snapshot()
+            left = deadline - asyncio.get_running_loop().time()
+            if snap["rev"] != seen or left <= 0:
+                return web.json_response(snap, headers={"Cache-Control": "no-store"})
+            try:
+                # Pending taps expire by the clock, not by an HA event: re-check every second.
+                await asyncio.wait_for(changed.wait(), min(left, 1.0))
+            except asyncio.TimeoutError:
+                pass
+
+    async def panel_cmd(self, request: web.Request) -> web.Response:
+        """POST /panel/cmd: one hk/1 knob message (adjust / toggle / mode / action) as
+        JSON; answers with its ack and the house as it is shown right after."""
+        try:
+            msg = json.loads(await request.text())
+            if not isinstance(msg, dict):
+                raise ValueError("not an object")
+        except ValueError as e:
+            return web.json_response({"ok": False, "message": f"bad message: {e}"}, status=400)
+        reply = _Reply()
+        try:
+            await self._handle(reply, msg)
+        except (ValueError, KeyError) as e:
+            reply.ack = {"ok": False, "message": f"bad message: {e}"}
+        ack = reply.ack or {"ok": True}
+        return web.json_response({"ok": bool(ack.get("ok")), "message": ack.get("message"),
+                                  **self._panel_snapshot()})
+
     async def firmware_version(self, request: web.Request) -> web.Response:
         meta = self.firmware_dir and self.firmware_dir / "version.json"
         if not meta or not meta.exists():
@@ -223,6 +285,11 @@ class Bridge:
         app.router.add_post("/admin/ota", self.ota)
         # The simulator is the knob's real interaction model in a browser; the other
         # concepts explored on the way are kept beside it for reference.
+        app.router.add_get("/panel", lambda r: web.HTTPFound("/panel/"))
+        app.router.add_get("/panel/", lambda r: web.FileResponse(
+            ROOT / "panel" / "index.html", headers={"Cache-Control": "no-cache"}))
+        app.router.add_get("/panel/state", self.panel_state)
+        app.router.add_post("/panel/cmd", self.panel_cmd)
         app.router.add_get("/", lambda r: web.HTTPFound("/sim/"))
         app.router.add_get("/sim/", lambda r: web.FileResponse(ROOT / "sim" / "concepts" / "touch-and-turn.html"))
         app.router.add_get("/sim/concepts/", lambda r: web.FileResponse(ROOT / "sim" / "concepts" / "index.html"))

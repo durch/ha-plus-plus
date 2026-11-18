@@ -90,6 +90,21 @@ ring adjusts. It is specified by its tests (`firmware/tests/test_hk_tt.c`) and c
 tried in a browser at `/sim/` on a running bridge. The other concepts considered are
 under `/sim/concepts/`.
 
+## Panel (e-ink browsers)
+
+A Kindle's browser cannot be trusted with a WebSocket, so the bridge also speaks plain
+HTTP to the page it serves at `/panel/`. Same controls, same messages, same logic.
+
+| Request | Meaning |
+|---|---|
+| `GET /panel/state?rev=<last seen>` | `{"rev", "ha", "dry_run", "controls": [state, …]}`. Answers at once when the house differs from `rev`, otherwise holds the request until it does (25 s at most). Cover states carry `labels`. |
+| `POST /panel/cmd` | Body: one knob → bridge message as JSON (`adjust`, `toggle`, `mode`, `action`). Answers `{"ok", "message", …state as above}`. |
+
+The page is tables and ES3 so that the oldest Kindle WebKit runs it, and redraws a row
+only when its content changes, so the screen does not flash. Rows are segmented
+selectors (black = current): Home/Away, Off/Heat/Cool with −/+, Off/On with −/+ and a
+scene list, and the two ends of each cover group.
+
 ## Climate logic (bridge)
 
 | Control | Heat drives | Cool drives |
